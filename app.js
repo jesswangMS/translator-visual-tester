@@ -371,11 +371,12 @@ class TranslatorApp {
     async startListening() {
         try {
             // Show loading status
-            this.updateStatus('Loading animations...');
+            this.updateStatus('Loading...');
 
-            // Preload all animation frames first (listening, thinking, timer, talking)
+            // Preload essential frames first (idle, listening, thinking, timer)
+            // Talking frames will be preloaded during THINKING state to avoid delays
             try {
-                await audioSync.preloadAllFrames();
+                await audioSync.preloadEssentialFrames();
             } catch (error) {
                 console.error('Failed to preload animation frames:', error);
                 alert('Failed to load animation frames. Please refresh and try again.');
@@ -658,12 +659,22 @@ class TranslatorApp {
         this.setState(States.THINKING);
         audioSync.startThinkingAnimation(this.avatarElement);
 
+        // Preload talking frames in background while thinking/translating
+        // This prevents loading delays when animation starts
+        const preloadPromise = audioSync.preloadTalkingFrames().catch(error => {
+            console.warn('Warning: Failed to preload talking frames:', error);
+            // Don't throw - continue with translation even if preload fails
+        });
+
         try {
             // Get API key
             const apiKey = this.apiKeyInput.value.trim();
 
-            // Translate with auto-detection
+            // Translate with auto-detection (runs in parallel with preload)
             const result = await translate(text, this.sourceLang, this.targetLang, apiKey, this.autoDetect);
+
+            // Wait for preload to complete before showing talking animation
+            await preloadPromise;
             const translation = result.translation;
             const detectedLang = result.detectedLang;
             const targetLang = result.targetLang;

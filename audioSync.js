@@ -30,14 +30,14 @@ class AudioSync {
         }; // Preloaded animation frame images
     }
 
-    // Preload all animation frames to prevent loading issues
-    async preloadAllFrames() {
+    // Preload essential frames at session start (idle, listening, thinking, timer)
+    async preloadEssentialFrames() {
         if (this.allFramesPreloaded) {
-            console.log('✅ All animation frames already preloaded');
+            console.log('✅ Essential frames already preloaded');
             return;
         }
 
-        console.log('📦 Preloading all animation frames...');
+        console.log('📦 Preloading essential animation frames...');
 
         // First preload idle.png
         console.log('📥 Preloading idle.png...');
@@ -54,11 +54,11 @@ class AudioSync {
             idleImg.src = 'images/idle.png';
         });
 
+        // Preload listening, thinking, and timer frames (NOT talking - that's done during THINKING)
         const animations = [
             { name: 'listening', count: 21, digits: 2 },
             { name: 'thinking', count: 60, digits: 3 },
-            { name: 'timer', count: 75, digits: 3 },
-            { name: 'talking', count: 60, digits: 3 }
+            { name: 'timer', count: 75, digits: 3 }
         ];
 
         let totalLoaded = 0;
@@ -74,9 +74,6 @@ class AudioSync {
                 const promise = new Promise((resolve, reject) => {
                     img.onload = () => {
                         totalLoaded++;
-                        if (totalLoaded % 20 === 0 || totalLoaded === totalFrames) {
-                            console.log(`   Progress: ${totalLoaded}/${totalFrames} frames (${Math.round(totalLoaded/totalFrames*100)}%)`);
-                        }
                         resolve();
                     };
                     img.onerror = () => {
@@ -91,7 +88,7 @@ class AudioSync {
 
             try {
                 await Promise.all(promises);
-                console.log(`   ✅ ${anim.name} frames loaded`);
+                console.log(`   ✅ ${anim.name} frames loaded (${anim.count} frames)`);
             } catch (error) {
                 console.error(`   ❌ Failed to load ${anim.name} frames:`, error);
                 throw error;
@@ -99,8 +96,43 @@ class AudioSync {
         }
 
         this.allFramesPreloaded = true;
-        console.log('✅ All animation frames preloaded successfully!');
-        console.log(`   Total: ${totalFrames} frames loaded`);
+        console.log('✅ Essential animation frames preloaded successfully!');
+        console.log(`   Total: ${totalFrames + 1} frames loaded (idle + listening + thinking + timer)`);
+    }
+
+    // Preload talking frames during THINKING state
+    async preloadTalkingFrames() {
+        if (this.preloadedImages.talking.length > 0) {
+            console.log('✅ Talking frames already preloaded');
+            return;
+        }
+
+        console.log('📦 Preloading talking animation (60 frames)...');
+        const promises = [];
+        const totalFrames = 60;
+
+        for (let i = 0; i < totalFrames; i++) {
+            const paddedIndex = i.toString().padStart(3, '0');
+            const img = new Image();
+            const promise = new Promise((resolve, reject) => {
+                img.onload = () => resolve();
+                img.onerror = () => {
+                    console.error(`   Failed to load talking/frame_${paddedIndex}.png`);
+                    reject(new Error(`Failed to load talking/frame_${paddedIndex}.png`));
+                };
+            });
+            img.src = `images/talking/frame_${paddedIndex}.png`;
+            this.preloadedImages.talking[i] = img;
+            promises.push(promise);
+        }
+
+        try {
+            await Promise.all(promises);
+            console.log('✅ Talking frames preloaded successfully (60 frames)');
+        } catch (error) {
+            console.error('❌ Failed to preload talking frames:', error);
+            throw error;
+        }
     }
 
     async initializeMicrophone() {
