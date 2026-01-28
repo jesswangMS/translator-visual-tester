@@ -371,18 +371,20 @@ class TranslatorApp {
     async startListening() {
         try {
             // Show loading status
-            this.updateStatus('Loading...');
+            this.updateStatus('Loading animations...');
+
+            // Preload all animation frames first (listening, thinking, timer, talking)
+            try {
+                await audioSync.preloadAllFrames();
+            } catch (error) {
+                console.error('Failed to preload animation frames:', error);
+                alert('Failed to load animation frames. Please refresh and try again.');
+                this.updateStatus('Error loading animations');
+                return;
+            }
 
             // Initialize microphone for animation
             await audioSync.initializeMicrophone();
-
-            // Preload talking frames to prevent loading issues
-            try {
-                await audioSync.preloadTalkingFrames();
-            } catch (error) {
-                console.warn('Warning: Failed to preload talking frames, animation may be choppy:', error);
-                // Continue anyway, just warn the user
-            }
 
             this.isActive = true;
             // Stay in IDLE state - will transition to LISTENING when audio detected
