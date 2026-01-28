@@ -17,6 +17,7 @@ class TranslatorApp {
         this.recognition = null;
         this.synthesis = window.speechSynthesis;
         this.isActive = false;
+        this.isTogglingListening = false; // Prevent double-clicking start/stop button
         this.translationTimer = null;
         this.cooldownInterval = null;
         this.lastTranscript = '';
@@ -348,10 +349,22 @@ class TranslatorApp {
     }
 
     async toggleListening() {
-        if (!this.isActive) {
-            await this.startListening();
-        } else {
-            this.stopListening();
+        // Prevent double-clicking
+        if (this.isTogglingListening) {
+            console.log('Already toggling listening state, ignoring click...');
+            return;
+        }
+
+        this.isTogglingListening = true;
+
+        try {
+            if (!this.isActive) {
+                await this.startListening();
+            } else {
+                this.stopListening();
+            }
+        } finally {
+            this.isTogglingListening = false;
         }
     }
 
@@ -365,8 +378,17 @@ class TranslatorApp {
             this.setState(States.IDLE);
             this.updateButton();
 
-            // Start speech recognition
-            this.recognition.start();
+            // Start speech recognition (only if not already running)
+            try {
+                this.recognition.start();
+                console.log('Speech recognition started successfully');
+            } catch (error) {
+                if (error.message && error.message.includes('already started')) {
+                    console.log('Speech recognition already running, continuing...');
+                } else {
+                    throw error; // Re-throw if it's a different error
+                }
+            }
 
             // Start listening animation but stay in idle visually until speech
             audioSync.startListeningAnimation(this.avatarElement);
@@ -418,7 +440,12 @@ class TranslatorApp {
         this.translationElement.textContent = '';
 
         // Stop all ongoing processes
-        this.recognition.stop();
+        try {
+            this.recognition.stop();
+            console.log('Speech recognition stopped');
+        } catch (error) {
+            console.log('Recognition already stopped or error:', error);
+        }
         this.synthesis.cancel();
 
         // Cleanup audio resources (this will close the microphone stream)
