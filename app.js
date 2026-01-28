@@ -370,20 +370,6 @@ class TranslatorApp {
 
     async startListening() {
         try {
-            // Show loading status
-            this.updateStatus('Loading...');
-
-            // Preload essential frames first (idle, listening, thinking, timer)
-            // Talking frames will be preloaded during THINKING state to avoid delays
-            try {
-                await audioSync.preloadEssentialFrames();
-            } catch (error) {
-                console.error('Failed to preload animation frames:', error);
-                alert('Failed to load animation frames. Please refresh and try again.');
-                this.updateStatus('Error loading animations');
-                return;
-            }
-
             // Initialize microphone for animation
             await audioSync.initializeMicrophone();
 
@@ -623,6 +609,8 @@ class TranslatorApp {
     }
 
     async handleTranslation(text) {
+        console.log(`🌐 handleTranslation called with: "${text}"`);
+
         if (!text || text.trim() === '') {
             // No content to translate - return to IDLE
             console.log('⚠️ No content to translate - returning to IDLE');
@@ -646,8 +634,10 @@ class TranslatorApp {
             return;
         }
 
-        // Clear any accumulated transcript (fresh start for next translation cycle)
+        // Clear accumulated transcript at START of translation cycle
+        // This prevents any speech captured during previous TALKING state from interfering
         this.accumulatedTranscript = '';
+        console.log('   - Cleared accumulatedTranscript at start of translation');
 
         // Stop listening animation (should already be stopped in WAITING state)
         audioSync.stopListeningAnimation();
@@ -655,26 +645,24 @@ class TranslatorApp {
         // Stop volume monitoring from WAITING state (otherwise it overwrites debug panel!)
         audioSync.stopVolumeMonitoring();
 
+        // IMPORTANT: Stop speech recognition during THINKING/TALKING to prevent echo
+        try {
+            this.recognition.stop();
+            console.log('🔴 Stopped speech recognition for THINKING/TALKING state');
+        } catch (error) {
+            console.log('Recognition already stopped or error:', error);
+        }
+
         // Enter thinking state
         this.setState(States.THINKING);
         audioSync.startThinkingAnimation(this.avatarElement);
-
-        // Preload talking frames in background while thinking/translating
-        // This prevents loading delays when animation starts
-        const preloadPromise = audioSync.preloadTalkingFrames().catch(error => {
-            console.warn('Warning: Failed to preload talking frames:', error);
-            // Don't throw - continue with translation even if preload fails
-        });
 
         try {
             // Get API key
             const apiKey = this.apiKeyInput.value.trim();
 
-            // Translate with auto-detection (runs in parallel with preload)
+            // Translate with auto-detection
             const result = await translate(text, this.sourceLang, this.targetLang, apiKey, this.autoDetect);
-
-            // Wait for preload to complete before showing talking animation
-            await preloadPromise;
             const translation = result.translation;
             const detectedLang = result.detectedLang;
             const targetLang = result.targetLang;
