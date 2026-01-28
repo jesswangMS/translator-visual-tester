@@ -21,6 +21,49 @@ class AudioSync {
         this.loopCount = 0; // Track animation loops
         this.smoothedVolume = 0; // Smoothed volume for listening animation
         this.volumeSmoothingFactor = 0.5; // Higher = faster response to volume changes (0.1-0.5 range)
+        this.talkingFramesPreloaded = false; // Track if talking frames are preloaded
+        this.talkingImages = []; // Preloaded talking frame images
+    }
+
+    // Preload talking animation frames to prevent loading issues
+    async preloadTalkingFrames() {
+        if (this.talkingFramesPreloaded) {
+            console.log('✅ Talking frames already preloaded');
+            return;
+        }
+
+        console.log('📦 Preloading 60 talking frames...');
+        const totalFrames = 60;
+        const promises = [];
+
+        for (let i = 0; i < totalFrames; i++) {
+            const paddedIndex = i.toString().padStart(3, '0');
+            const img = new Image();
+            const promise = new Promise((resolve, reject) => {
+                img.onload = () => {
+                    if (i % 10 === 0) {
+                        console.log(`   Loaded frame ${i}/${totalFrames}`);
+                    }
+                    resolve();
+                };
+                img.onerror = () => {
+                    console.error(`   Failed to load frame_${paddedIndex}.png`);
+                    reject(new Error(`Failed to load frame_${paddedIndex}.png`));
+                };
+            });
+            img.src = `images/talking/frame_${paddedIndex}.png`;
+            this.talkingImages[i] = img;
+            promises.push(promise);
+        }
+
+        try {
+            await Promise.all(promises);
+            this.talkingFramesPreloaded = true;
+            console.log('✅ All 60 talking frames preloaded successfully');
+        } catch (error) {
+            console.error('❌ Failed to preload talking frames:', error);
+            throw error;
+        }
     }
 
     async initializeMicrophone() {
