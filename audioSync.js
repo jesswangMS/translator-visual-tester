@@ -293,7 +293,7 @@ class AudioSync {
         }
     }
 
-    // Talking animation - 180 frames PNG sequence with dynamic fps based on speaking rate
+    // Talking animation - 60 frames PNG sequence with dynamic fps based on speaking rate
     async startTalkingAnimation(avatarElement, getRateMultiplier = null) {
         if (this.isTalking) {
             console.warn('⚠️ Talking animation already running!');
@@ -313,12 +313,13 @@ class AudioSync {
 
         // Base FPS that will be multiplied by speaking rate
         const baseFps = 60;
+        const totalFrames = 60; // Updated from 180 to 60 frames
         let logCounter = 0;
         let lastLoggedRate = 1.0;
 
         const animateTalking = () => {
             if (!this.isTalking) {
-                const totalLoops = Math.floor(logCounter / 180);
+                const totalLoops = Math.floor(logCounter / totalFrames);
                 console.log(`🗣️ Talking session ended`);
                 console.log(`   📊 Total frames played: ${logCounter}`);
                 console.log(`   🔄 Animation looped: ${totalLoops} times`);
@@ -330,17 +331,17 @@ class AudioSync {
             const fps = baseFps * rateMultiplier;
             const frameDelay = Math.round(1000 / fps);
 
-            // Format frame number with 3 digits (000-179)
+            // Format frame number with 3 digits (000-059)
             const paddedFrame = this.talkingFrame.toString().padStart(3, '0');
             const imagePath = `images/talking/frame_${paddedFrame}.png`;
             avatarElement.src = imagePath;
 
             // Move to next frame and loop
             const previousFrame = this.talkingFrame;
-            this.talkingFrame = (this.talkingFrame + 1) % 180;
+            this.talkingFrame = (this.talkingFrame + 1) % totalFrames;
 
             // Log when animation loops back to start
-            if (previousFrame === 179 && this.talkingFrame === 0) {
+            if (previousFrame === (totalFrames - 1) && this.talkingFrame === 0) {
                 this.loopCount++;
                 console.log(`🔄 Animation looped back to frame 0 (Loop #${this.loopCount})`);
             }
@@ -353,7 +354,7 @@ class AudioSync {
             // Log every 60 frames (once per second at base 60 fps)
             logCounter++;
             if (logCounter % 60 === 0 || Math.abs(rateMultiplier - lastLoggedRate) > 0.1) {
-                console.log(`🗣️ Talking - Rate: ${rateMultiplier.toFixed(2)}x, FPS: ${fps.toFixed(1)}, Frame: ${paddedFrame}, Loop #${Math.floor(logCounter / 180)}`);
+                console.log(`🗣️ Talking - Rate: ${rateMultiplier.toFixed(2)}x, FPS: ${fps.toFixed(1)}, Frame: ${paddedFrame}, Loop #${Math.floor(logCounter / totalFrames)}`);
                 if (Math.abs(rateMultiplier - lastLoggedRate) > 0.1) {
                     console.log(`   📈 Rate changed: ${lastLoggedRate.toFixed(2)}x → ${rateMultiplier.toFixed(2)}x`);
                     lastLoggedRate = rateMultiplier;
@@ -364,7 +365,7 @@ class AudioSync {
             this.animationFrameId = setTimeout(() => animateTalking(), frameDelay);
         };
 
-        console.log('   Expected images: images/talking/frame_000.png to frame_179.png');
+        console.log('   Expected images: images/talking/frame_000.png to frame_059.png');
         console.log('   Playing at dynamic fps based on speaking rate');
 
         animateTalking();
