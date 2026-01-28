@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interpreter Visual Tester</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Interpreter Visual Tester</h1>
+
+        <!-- Protocol Warning -->
+        <div id="protocol-warning" class="protocol-warning" style="display: none;">
+            ⚠️ You're opening this as a local file. Microphone permissions won't be saved between sessions.
+            <br>
+            <strong>Solution:</strong> Run <code>serve.bat</code> (Windows) or <code>serve.sh</code> (Mac/Linux) and open <code>http://localhost:8000</code>
+        </div>
+
+        <!-- Avatar Display -->
+        <div class="avatar-container">
+            <img id="avatar" src="images/idle.png" alt="Interpreter Avatar">
+            <div id="status-text" class="status-text">Ready</div>
+            <div id="cooldown-timer" class="cooldown-timer" style="display: none;">
+                <div class="cooldown-circle">
+                    <svg width="60" height="60">
+                        <circle cx="30" cy="30" r="25" fill="none" stroke="#e0e0e0" stroke-width="4"/>
+                        <circle id="cooldown-progress" cx="30" cy="30" r="25" fill="none" stroke="#667eea" stroke-width="4"
+                                stroke-dasharray="157" stroke-dashoffset="157" transform="rotate(-90 30 30)"/>
+                    </svg>
+                    <span id="cooldown-text" class="cooldown-text">2.5</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Start/Stop Button (Always Visible) -->
+        <button id="start-btn" class="btn btn-primary">
+            <span id="btn-text">Start Session</span>
+        </button>
+
+        <!-- Timer Toggle Button -->
+        <button id="timer-toggle-btn" class="btn btn-secondary">
+            <span id="timer-toggle-text">Show Timer</span>
+        </button>
+
+        <!-- Settings Toggle Button -->
+        <button id="settings-toggle" class="btn btn-secondary settings-toggle">
+            <span id="settings-toggle-text">⚙️ Settings</span>
+        </button>
+
+        <!-- Collapsible Settings Panel -->
+        <div id="settings-panel" class="settings-panel" style="display: none;">
+            <!-- Language Toggle -->
+            <div class="language-toggle">
+                <button id="language-btn" class="btn btn-secondary">
+                    <span id="lang-direction">AUTO</span>
+                </button>
+            </div>
+
+            <!-- API Key Input (Optional) -->
+            <div class="api-key-section">
+                <label for="api-key">API Key (optional):</label>
+                <input
+                    type="password"
+                    id="api-key"
+                    placeholder="AIza... or Azure key"
+                    autocomplete="off"
+                >
+                <small><strong>Translation:</strong> Google Gemini API (AIza...) - Get free key at <a href="https://aistudio.google.com/app/apikey" target="_blank">AI Studio</a><br>
+                <strong>Text-to-Speech:</strong> Azure Speech API (32-char) - Get free key at <a href="https://portal.azure.com/" target="_blank">Azure Portal</a><br>
+                Note: Claude API requires a backend server due to CORS restrictions</small>
+            </div>
+
+            <!-- Azure Region Input (Only for Azure Speech) -->
+            <div class="api-key-section">
+                <label for="azure-region">Azure Region (if using Azure Speech):</label>
+                <input
+                    type="text"
+                    id="azure-region"
+                    placeholder="e.g., eastus, westeurope, swedencentral"
+                    value="eastus"
+                    autocomplete="off"
+                >
+                <small>Enter your Azure Speech resource region. Common regions: eastus, westus, westeurope, swedencentral, etc.<br>
+                Find your region in Azure Portal → Your Speech Resource → Keys and Endpoint</small>
+            </div>
+
+            <!-- Transcription Display -->
+            <div class="transcription-box">
+                <div class="transcription-label">You said:</div>
+                <div id="transcription" class="transcription-text"></div>
+            </div>
+
+            <!-- Translation Display -->
+            <div class="translation-box">
+                <div class="translation-label">Translation:</div>
+                <div id="translation" class="translation-text"></div>
+            </div>
+
+            <!-- State Debug Display -->
+            <div class="state-debug">
+                <div class="state-debug-label">Current State:</div>
+                <div id="state-display" class="state-display">IDLE</div>
+                <div class="recognition-status" id="recognition-status">🔴 Recognition: Stopped</div>
+            </div>
+
+            <!-- Audio Debug Panel -->
+            <div class="debug-panel">
+                <div class="debug-label">Audio Debug:</div>
+                <div class="debug-info">
+                    <div>Volume: <span id="debug-volume">0</span> / 200</div>
+                    <div>Animation: <span id="debug-animation-state">Idle</span></div>
+                    <div>Current Frame: <span id="debug-frame" class="frame-number">-</span></div>
+                    <div id="speed-display" style="display: none;">
+                        Playback Speed: <span id="debug-speed" class="fps-number">15.0 fps</span>
+                    </div>
+                    <div id="loop-display" style="display: none;">
+                        Loops Completed: <span id="debug-loops">0</span>
+                    </div>
+                    <div class="volume-bar-container">
+                        <div id="volume-bar" class="volume-bar"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Instructions -->
+            <div class="instructions">
+                <h3>How to use:</h3>
+                <ol>
+                    <li>Click "Start Session" and allow microphone access</li>
+                    <li>Speak clearly in either English or Chinese</li>
+                    <li>The translator will automatically detect your language and translate to the other</li>
+                    <li>The avatar will listen, think, and speak the translation</li>
+                    <li>After translation, the avatar returns to listening automatically</li>
+                    <li>Click "Stop Session" when finished</li>
+                    <li>(Optional) Click the language button to switch between AUTO, EN→ZH, and ZH→EN modes</li>
+                    <li>(Optional) Add your Gemini API key for better translations</li>
+                    <li>(Optional) Add your Azure Speech key for better voice quality and perfect lip-sync</li>
+                </ol>
+                <p class="note">Note: Works best in Chrome or Edge browsers</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="translator.js"></script>
+    <script src="audioSync.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
