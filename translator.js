@@ -34,48 +34,38 @@ function detectLanguage(text) {
     }
 }
 
-async function translateWithClaude(text, sourceLang, targetLang, apiKey) {
-    if (!apiKey || apiKey.trim() === '') {
-        throw new Error('No API key provided');
-    }
-
-    const sourceName = LANG_CODES[sourceLang]?.name || sourceLang;
-    const targetName = LANG_CODES[targetLang]?.name || targetLang;
-
-    const prompt = `Translate the following ${sourceName} text to ${targetName}.
-Only provide the translation, no explanations or additional text:
-
-${text}`;
-
+// Call backend server for Claude translation (avoids CORS)
+async function translateWithClaudeBackend(text, sourceLang, targetLang) {
     try {
-        const response = await fetch(CLAUDE_API_URL, {
+        const response = await fetch('http://localhost:3000/api/translate', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01'
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                model: CLAUDE_MODEL,
-                max_tokens: 1024,
-                messages: [{
-                    role: 'user',
-                    content: prompt
-                }]
+                text,
+                sourceLang,
+                targetLang
             })
         });
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            throw new Error(`Claude API error: ${response.status} ${errorData.error?.message || ''}`);
+            throw new Error(`Backend error: ${response.status} ${errorData.error || ''}`);
         }
 
         const data = await response.json();
-        return data.content[0].text.trim();
+        return data.translation;
     } catch (error) {
-        console.error('Claude API error:', error);
+        console.error('Backend translation error:', error);
         throw error;
     }
+}
+
+// Direct Claude API call (NOT USED - CORS blocked in browser)
+// Kept for reference only
+async function translateWithClaude(text, sourceLang, targetLang, apiKey) {
+    throw new Error('Direct Claude API calls are blocked by CORS. Use the backend server instead.');
 }
 
 // Azure Speech TTS function
@@ -214,6 +204,21 @@ async function translateWithFree(text, sourceLang, targetLang) {
     }
 }
 
+// Check if backend server is available
+async function checkBackendAvailable() {
+    try {
+        const response = await fetch('http://localhost:3000/api/health', {
+            method: 'GET',
+            signal: AbortSignal.timeout(2000) // 2 second timeout
+        });
+        const data = await response.json();
+        return data.status === 'ok' && data.apiKeyConfigured;
+    } catch (error) {
+        console.log('Backend server not available:', error.message);
+        return false;
+    }
+}
+
 // Detect which API key type is provided
 function detectAPIKeyType(apiKey) {
     if (!apiKey || apiKey.trim() === '') {
@@ -224,7 +229,7 @@ function detectAPIKeyType(apiKey) {
 
     // Claude API keys start with 'sk-ant-'
     if (apiKey.startsWith('sk-ant-')) {
-        console.log('   Detected: Claude API key');
+        console.log('   Detected: Claude API key (will use backend server)');
         return 'claude';
     }
 
@@ -265,6 +270,22 @@ async function translate(text, sourceLang, targetLang, apiKey = '', autoDetect =
 
     console.log(`Translating from ${sourceLang} to ${targetLang}: "${text}"`);
 
+    // Check if backend server is available for Claude API
+    const backendAvailable = await checkBackendAvailable();
+    if (backendAvailable) {
+        console.log('✅ Backend server available - using Claude API');
+        try {
+            const translation = await translateWithClaudeBackend(text, sourceLang, targetLang);
+            console.log('Claude API (via backend) translation successful');
+            return { translation, detectedLang: sourceLang, targetLang };
+        } catch (error) {
+            console.warn('Backend translation failed, falling back:', error.message);
+        }
+    } else {
+        console.log('⚠️  Backend server not running - Claude API unavailable');
+        console.log('   Start server with: npm start');
+    }
+
     // Try AI API if API key is provided
     if (apiKey && apiKey.trim() !== '') {
         const apiType = detectAPIKeyType(apiKey);
@@ -280,8 +301,8 @@ async function translate(text, sourceLang, targetLang, apiKey = '', autoDetect =
                 console.log('Azure Speech key detected - will be used for TTS only');
                 // Azure is for TTS, not translation - fall through to free API
             } else if (apiType === 'claude') {
-                console.warn('⚠️ Claude API cannot be called directly from browser due to CORS restrictions.');
-                console.warn('   Use Gemini API instead, or set up a backend server.');
+                console.log('ℹ️  Claude API key detected but backend server is required');
+                console.log('   The backend server will use the API key from .env file');
                 // Fall through to free API
             }
         } catch (error) {

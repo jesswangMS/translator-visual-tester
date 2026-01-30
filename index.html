@@ -59,16 +59,17 @@
 
             <!-- API Key Input (Optional) -->
             <div class="api-key-section">
-                <label for="api-key">API Key (optional):</label>
+                <label for="api-key">API Key (optional for Gemini/Azure):</label>
                 <input
                     type="password"
                     id="api-key"
-                    placeholder="AIza... or Azure key"
+                    placeholder="AIza... for Gemini or Azure Speech key"
                     autocomplete="off"
                 >
-                <small><strong>Translation:</strong> Google Gemini API (AIza...) - Get free key at <a href="https://aistudio.google.com/app/apikey" target="_blank">AI Studio</a><br>
-                <strong>Text-to-Speech:</strong> Azure Speech API (32-char) - Get free key at <a href="https://portal.azure.com/" target="_blank">Azure Portal</a><br>
-                Note: Claude API requires a backend server due to CORS restrictions</small>
+                <small><strong>🤖 Claude API:</strong> Automatic via backend server (run <code>npm start</code>) - See README_CLAUDE_SETUP.md<br>
+                <strong>🔮 Gemini API:</strong> Enter key above (AIza...) - Get free key at <a href="https://aistudio.google.com/app/apikey" target="_blank">AI Studio</a><br>
+                <strong>🎙️ Azure Speech TTS:</strong> Enter key above (32-char) - Get free key at <a href="https://portal.azure.com/" target="_blank">Azure Portal</a><br>
+                <strong>🆓 Free API:</strong> MyMemory (no key needed, used as fallback)</small>
             </div>
 
             <!-- Azure Region Input (Only for Azure Speech) -->
