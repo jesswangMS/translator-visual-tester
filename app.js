@@ -370,8 +370,13 @@ class TranslatorApp {
 
     async startListening() {
         try {
-            // Preload all essential animation frames (listening, thinking, timer) before starting
-            await audioSync.preloadEssentialFrames();
+            // Preload ALL animation frames (listening, thinking, timer, talking) before starting
+            console.log('📦 Preloading all animation frames...');
+            await Promise.all([
+                audioSync.preloadEssentialFrames(),
+                audioSync.preloadTalkingFrames()
+            ]);
+            console.log('✅ All frames preloaded and ready!');
 
             // Initialize microphone for animation
             await audioSync.initializeMicrophone();
@@ -659,11 +664,6 @@ class TranslatorApp {
         // Enter thinking state
         this.setState(States.THINKING);
         audioSync.startThinkingAnimation(this.avatarElement);
-
-        // Preload talking frames during THINKING state (so they're ready for TALKING)
-        audioSync.preloadTalkingFrames().catch(err => {
-            console.warn('Failed to preload talking frames:', err);
-        });
 
         try {
             // Get API key

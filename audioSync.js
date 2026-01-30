@@ -405,17 +405,16 @@ class AudioSync {
         }
     }
 
-    // Talking animation - 60 frames PNG sequence with dynamic fps based on speaking rate
+    // Talking animation - 60 frames PNG sequence at constant 15 fps
     async startTalkingAnimation(avatarElement, getRateMultiplier = null) {
         if (this.isTalking) {
             console.warn('⚠️ Talking animation already running!');
             return;
         }
 
-        console.log('🗣️ Starting talking animation with dynamic rate');
+        console.log('🗣️ Starting talking animation at constant 15 fps');
         console.log('   Avatar element:', avatarElement);
         console.log('   Current src before starting:', avatarElement.src);
-        console.log('   Rate multiplier function:', getRateMultiplier ? 'Provided' : 'Not provided (will use fixed 60fps)');
 
         this.isTalking = true;
         this.talkingFrame = 0;
@@ -423,11 +422,11 @@ class AudioSync {
 
         await this.ensureAudioContext();
 
-        // Base FPS that will be multiplied by speaking rate
-        const baseFps = 60;
-        const totalFrames = 60; // Updated from 180 to 60 frames
+        // Constant 15 fps for smooth, consistent playback
+        const fps = 15;
+        const totalFrames = 60;
+        const frameDelay = Math.round(1000 / fps); // ~67ms per frame
         let logCounter = 0;
-        let lastLoggedRate = 1.0;
 
         const animateTalking = () => {
             if (!this.isTalking) {
@@ -438,15 +437,15 @@ class AudioSync {
                 return;
             }
 
-            // Get current rate multiplier (1.0 = normal, 0.5 = half speed, 2.0 = double speed)
-            const rateMultiplier = getRateMultiplier ? getRateMultiplier() : 1.0;
-            const fps = baseFps * rateMultiplier;
-            const frameDelay = Math.round(1000 / fps);
-
             // Format frame number with 3 digits (000-059)
             const paddedFrame = this.talkingFrame.toString().padStart(3, '0');
-            const imagePath = `images/talking/frame_${paddedFrame}.png`;
-            avatarElement.src = imagePath;
+
+            // Use preloaded images if available, otherwise fall back to path
+            if (this.preloadedImages.talking[this.talkingFrame]) {
+                avatarElement.src = this.preloadedImages.talking[this.talkingFrame].src;
+            } else {
+                avatarElement.src = `images/talking/frame_${paddedFrame}.png`;
+            }
 
             // Move to next frame and loop
             const previousFrame = this.talkingFrame;
@@ -458,27 +457,23 @@ class AudioSync {
                 console.log(`🔄 Animation looped back to frame 0 (Loop #${this.loopCount})`);
             }
 
-            // Update debug panel with dynamic fps and loop count
+            // Update debug panel with constant fps and loop count
             const frameDisplay = `frame_${paddedFrame}`;
             const volume = this.getVolume(); // Still get volume for debug display
             this.updateDebugPanel(volume, frameDisplay, fps, 'Talking', this.loopCount);
 
-            // Log every 60 frames (once per second at base 60 fps)
+            // Log every 15 frames (once per second at 15 fps)
             logCounter++;
-            if (logCounter % 60 === 0 || Math.abs(rateMultiplier - lastLoggedRate) > 0.1) {
-                console.log(`🗣️ Talking - Rate: ${rateMultiplier.toFixed(2)}x, FPS: ${fps.toFixed(1)}, Frame: ${paddedFrame}, Loop #${Math.floor(logCounter / totalFrames)}`);
-                if (Math.abs(rateMultiplier - lastLoggedRate) > 0.1) {
-                    console.log(`   📈 Rate changed: ${lastLoggedRate.toFixed(2)}x → ${rateMultiplier.toFixed(2)}x`);
-                    lastLoggedRate = rateMultiplier;
-                }
+            if (logCounter % 15 === 0) {
+                console.log(`🗣️ Talking - Constant 15 fps, Frame: ${paddedFrame}, Loop #${Math.floor(logCounter / totalFrames)}`);
             }
 
-            // Continue animation at dynamic rate
+            // Continue animation at constant 15 fps
             this.animationFrameId = setTimeout(() => animateTalking(), frameDelay);
         };
 
         console.log('   Expected images: images/talking/frame_000.png to frame_059.png');
-        console.log('   Playing at dynamic fps based on speaking rate');
+        console.log('   Playing at constant 15 fps (67ms per frame)');
 
         animateTalking();
     }
