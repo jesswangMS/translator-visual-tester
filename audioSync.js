@@ -26,8 +26,28 @@ class AudioSync {
             listening: [],
             thinking: [],
             timer: [],
-            talking: []
+            talking: [],
+            idle: null
         }; // Preloaded animation frame images
+        this.canvas = null;
+        this.ctx = null;
+    }
+
+    // Initialize canvas context
+    initCanvas(canvasElement) {
+        this.canvas = canvasElement;
+        this.ctx = this.canvas.getContext('2d', { alpha: true });
+        console.log('🎨 Canvas initialized for rendering');
+    }
+
+    // Draw an image to the canvas
+    drawToCanvas(image) {
+        if (!this.ctx || !this.canvas) {
+            console.error('Canvas not initialized');
+            return;
+        }
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.drawImage(image, 0, 0, this.canvas.width, this.canvas.height);
     }
 
     // Preload essential frames at session start (idle, listening, thinking, timer)
@@ -45,6 +65,7 @@ class AudioSync {
         await new Promise((resolve, reject) => {
             idleImg.onload = () => {
                 console.log('   ✅ idle.png loaded');
+                this.preloadedImages.idle = idleImg;
                 resolve();
             };
             idleImg.onerror = () => {
@@ -224,9 +245,10 @@ class AudioSync {
             const frameIndex = Math.floor((clampedVolume / 150) * 20);
             const paddedIndex = frameIndex.toString().padStart(2, '0');
 
-            // Update avatar image
-            const newSrc = `images/listening/frame_${paddedIndex}.png`;
-            avatarElement.src = newSrc;
+            // Draw preloaded image to canvas
+            if (this.preloadedImages.listening[frameIndex]) {
+                this.drawToCanvas(this.preloadedImages.listening[frameIndex]);
+            }
 
             // Update debug panel (show smoothed volume)
             const frameDisplay = `frame_${paddedIndex}`;
@@ -309,9 +331,13 @@ class AudioSync {
         const animateThinking = () => {
             if (!this.isThinking) return;
 
+            // Draw preloaded image to canvas
+            if (this.preloadedImages.thinking[this.thinkingFrame]) {
+                this.drawToCanvas(this.preloadedImages.thinking[this.thinkingFrame]);
+            }
+
             // Format frame number with 3 digits (000-059)
             const paddedFrame = this.thinkingFrame.toString().padStart(3, '0');
-            avatarElement.src = `images/thinking/frame_${paddedFrame}.png`;
 
             // Update debug panel
             const frameDisplay = `frame_${paddedFrame}`;
@@ -355,13 +381,16 @@ class AudioSync {
 
         const playFrame = () => {
             if (currentFrame < totalFrames) {
-                const paddedIndex = currentFrame.toString().padStart(3, '0');
-                const imagePath = `images/timer/frame_${paddedIndex}.png`;
-                avatarElement.src = imagePath;
+                // Draw preloaded image to canvas
+                if (this.preloadedImages.timer[currentFrame]) {
+                    this.drawToCanvas(this.preloadedImages.timer[currentFrame]);
+                }
 
-                // Log first frame to verify path
+                const paddedIndex = currentFrame.toString().padStart(3, '0');
+
+                // Log first frame to verify
                 if (currentFrame === 0) {
-                    console.log(`   🖼️ First frame: ${imagePath}`);
+                    console.log(`   🖼️ First frame rendered to canvas`);
                 }
 
                 currentFrame++;
@@ -413,8 +442,7 @@ class AudioSync {
         }
 
         console.log('🗣️ Starting talking animation at constant 15 fps');
-        console.log('   Avatar element:', avatarElement);
-        console.log('   Current src before starting:', avatarElement.src);
+        console.log('   Using canvas rendering for instant frame updates');
 
         this.isTalking = true;
         this.talkingFrame = 0;
@@ -437,15 +465,13 @@ class AudioSync {
                 return;
             }
 
+            // Draw preloaded image to canvas for instant rendering
+            if (this.preloadedImages.talking[this.talkingFrame]) {
+                this.drawToCanvas(this.preloadedImages.talking[this.talkingFrame]);
+            }
+
             // Format frame number with 3 digits (000-059)
             const paddedFrame = this.talkingFrame.toString().padStart(3, '0');
-
-            // Use preloaded images if available, otherwise fall back to path
-            if (this.preloadedImages.talking[this.talkingFrame]) {
-                avatarElement.src = this.preloadedImages.talking[this.talkingFrame].src;
-            } else {
-                avatarElement.src = `images/talking/frame_${paddedFrame}.png`;
-            }
 
             // Move to next frame and loop
             const previousFrame = this.talkingFrame;

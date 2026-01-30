@@ -37,6 +37,8 @@ class TranslatorApp {
 
     initializeElements() {
         this.avatarElement = document.getElementById('avatar');
+        // Initialize canvas for avatar rendering
+        audioSync.initCanvas(this.avatarElement);
         this.statusElement = document.getElementById('status-text');
         this.startButton = document.getElementById('start-btn');
         this.buttonText = document.getElementById('btn-text');
@@ -56,6 +58,13 @@ class TranslatorApp {
         this.cooldownProgressElement = document.getElementById('cooldown-progress');
         this.stateDisplayElement = document.getElementById('state-display');
         this.recognitionStatusElement = document.getElementById('recognition-status');
+    }
+
+    showIdleImage() {
+        // Draw idle image to canvas
+        if (audioSync.preloadedImages.idle) {
+            audioSync.drawToCanvas(audioSync.preloadedImages.idle);
+        }
     }
 
     initializeSpeechRecognition() {
@@ -460,7 +469,7 @@ class TranslatorApp {
         audioSync.cleanup();
 
         // Return to idle
-        this.avatarElement.src = 'images/idle.png';
+        this.showIdleImage();
         this.setState(States.IDLE);
         this.updateButton();
 
@@ -571,7 +580,7 @@ class TranslatorApp {
 
         // Quick transition through idle.png without fading opacity
         // This keeps the PNG visible throughout (no transparency/grey background showing)
-        this.avatarElement.src = 'images/idle.png';
+        this.showIdleImage();
 
         // Brief pause on idle, then transition to LISTENING
         setTimeout(() => {
@@ -594,7 +603,7 @@ class TranslatorApp {
             // Only transition if still in LISTENING state and session is active
             if (this.currentState === States.LISTENING && this.isActive) {
                 // Transition to IDLE
-                this.avatarElement.src = 'images/idle.png';
+                this.showIdleImage();
                 this.setState(States.IDLE);
                 console.log('   - Returned to IDLE due to inactivity');
             }
@@ -625,7 +634,7 @@ class TranslatorApp {
 
             if (this.isActive) {
                 // Return to IDLE and stay there
-                this.avatarElement.src = 'images/idle.png';
+                this.showIdleImage();
                 this.setState(States.IDLE);
 
                 try {
@@ -636,7 +645,7 @@ class TranslatorApp {
 
                 // Note: Speech recognition continues, will detect when user speaks again
             } else {
-                this.avatarElement.src = 'images/idle.png';
+                this.showIdleImage();
                 this.setState(States.IDLE);
             }
             return;
@@ -701,7 +710,7 @@ class TranslatorApp {
 
             // If session is still active, return to IDLE
             if (this.isActive) {
-                this.avatarElement.src = 'images/idle.png';
+                this.showIdleImage();
                 this.setState(States.IDLE);
                 try {
                     this.recognition.start();
@@ -710,7 +719,7 @@ class TranslatorApp {
                 }
                 // Note: Speech recognition continues, will detect when user speaks again
             } else {
-                this.avatarElement.src = 'images/idle.png';
+                this.showIdleImage();
                 this.setState(States.IDLE);
             }
         }
@@ -875,7 +884,7 @@ class TranslatorApp {
                 this.accumulatedTranscript = '';
 
                 // Go to IDLE state and stay there
-                this.avatarElement.src = 'images/idle.png';
+                this.showIdleImage();
                 this.setState(States.IDLE);
 
                 // Restart speech recognition but stay in IDLE
@@ -898,7 +907,7 @@ class TranslatorApp {
                 this.transcriptionElement.textContent = '';
                 this.translationElement.textContent = '';
 
-                this.avatarElement.src = 'images/idle.png';
+                this.showIdleImage();
                 this.setState(States.IDLE);
 
                 // Restart recognition
@@ -925,7 +934,6 @@ class TranslatorApp {
         utterance.onstart = () => {
             console.log('🎙️ TTS Speech started - entering TALKING state');
             console.log('   Avatar element:', this.avatarElement);
-            console.log('   Current avatar src:', this.avatarElement.src);
             startTime = Date.now();
             wordCount = 0;
             this.setState(States.TALKING);
@@ -998,7 +1006,7 @@ class TranslatorApp {
                     this.accumulatedTranscript = '';
 
                     // Go to IDLE state and stay there
-                    this.avatarElement.src = 'images/idle.png';
+                    this.showIdleImage();
                     this.setState(States.IDLE);
 
                     // Restart speech recognition but stay in IDLE
@@ -1017,7 +1025,7 @@ class TranslatorApp {
                     this.lastTranscript = '';
                     console.log('   - Cleared lastTranscript for fresh start');
 
-                    this.avatarElement.src = 'images/idle.png';
+                    this.showIdleImage();
                     this.setState(States.IDLE);
 
                     try {
@@ -1029,7 +1037,7 @@ class TranslatorApp {
                     // Note: Speech recognition continues, will detect when user speaks again
                 }
             } else {
-                this.avatarElement.src = 'images/idle.png';
+                this.showIdleImage();
                 this.setState(States.IDLE);
             }
             resolve();
@@ -1161,7 +1169,7 @@ class TranslatorApp {
 }
 
 // Initialize app when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // Check if page is opened via file:// protocol
     if (window.location.protocol === 'file:') {
         const warning = document.getElementById('protocol-warning');
@@ -1174,4 +1182,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const app = new TranslatorApp();
     console.log('Translator app initialized');
+
+    // Load and display idle image on startup
+    const idleImg = new Image();
+    idleImg.onload = () => {
+        audioSync.preloadedImages.idle = idleImg;
+        app.showIdleImage();
+        console.log('✅ Idle image loaded and displayed');
+    };
+    idleImg.src = 'images/idle.png';
 });
