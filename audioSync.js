@@ -17,20 +17,22 @@ class AudioSync {
         this.talkingFrame = 0;
         this.isMicrophoneInitialized = false;
         this.volumeCallback = null; // Callback for volume detection
-        this.volumeThreshold = 15; // Threshold to detect speech (lowered for faster response)
+        this.volumeThreshold = 8; // Threshold to detect speech (lower = faster response)
         this.loopCount = 0; // Track animation loops
         this.smoothedVolume = 0; // Smoothed volume for listening animation
-        this.volumeSmoothingFactor = 0.5; // Higher = faster response to volume changes (0.1-0.5 range)
+        this.volumeSmoothingFactor = 0.8; // Higher = faster response to volume changes (0-1, higher is faster)
         this.allFramesPreloaded = false; // Track if all animation frames are preloaded
-        this.preloadedImages = {
-            listening: [],
-            thinking: [],
-            timer: [],
-            talking: [],
+        this.spriteSheets = {
+            listening: null,
+            thinking: null,
+            timer: null,
+            talking: null,
             idle: null
-        }; // Preloaded animation frame images
+        }; // Sprite sheet images
+        this.spriteMetadata = null; // Metadata for sprite sheets
         this.canvas = null;
         this.ctx = null;
+        this.avatarScale = 0.4; // Avatar scale (0.2 to 1.0), default 40%
     }
 
     // Initialize canvas context
@@ -46,26 +48,75 @@ class AudioSync {
             console.error('Canvas not initialized');
             return;
         }
+
+        // Use configurable avatar scale
+        const scale = this.avatarScale;
+        const destWidth = this.canvas.width * scale;
+        const destHeight = this.canvas.height * scale;
+        const x = (this.canvas.width - destWidth) / 2;
+        const y = (this.canvas.height - destHeight) / 2;
+
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        this.ctx.drawImage(image, 0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.drawImage(image, x, y, destWidth, destHeight);
     }
 
-    // Preload essential frames at session start (idle, listening, thinking, timer)
-    async preloadEssentialFrames() {
-        if (this.allFramesPreloaded) {
-            console.log('✅ Essential frames already preloaded');
+    // Draw a specific frame from a sprite sheet
+    drawSpriteFrame(spriteSheet, frameIndex, metadata) {
+        if (!this.ctx || !this.canvas) {
+            console.error('Canvas not initialized');
             return;
         }
 
-        console.log('📦 Preloading essential animation frames...');
+        const { frameWidth, frameHeight, framesPerRow } = metadata;
 
-        // First preload idle.png
+        // Calculate position in sprite sheet
+        const col = frameIndex % framesPerRow;
+        const row = Math.floor(frameIndex / framesPerRow);
+        const sx = col * frameWidth;
+        const sy = row * frameHeight;
+
+        // Use configurable avatar scale
+        const scale = this.avatarScale;
+        const destWidth = this.canvas.width * scale;
+        const destHeight = this.canvas.height * scale;
+        const x = (this.canvas.width - destWidth) / 2;
+        const y = (this.canvas.height - destHeight) / 2;
+
+        // Clear and draw the frame centered and scaled
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.drawImage(
+            spriteSheet,
+            sx, sy, frameWidth, frameHeight,  // Source rectangle
+            x, y, destWidth, destHeight  // Destination rectangle (centered and scaled)
+        );
+    }
+
+    // Preload essential sprite sheets at session start (idle, listening, thinking, timer)
+    async preloadEssentialFrames() {
+        if (this.allFramesPreloaded) {
+            console.log('✅ Essential sprite sheets already preloaded');
+            return;
+        }
+
+        console.log('📦 Preloading sprite sheets (fast loading!)...');
+
+        // Load metadata first
+        try {
+            const metadataResponse = await fetch('images/sprites/metadata.json');
+            this.spriteMetadata = await metadataResponse.json();
+            console.log('   ✅ Metadata loaded');
+        } catch (error) {
+            console.error('   ❌ Failed to load sprite metadata:', error);
+            throw error;
+        }
+
+        // Preload idle.png
         console.log('📥 Preloading idle.png...');
         const idleImg = new Image();
         await new Promise((resolve, reject) => {
             idleImg.onload = () => {
                 console.log('   ✅ idle.png loaded');
-                this.preloadedImages.idle = idleImg;
+                this.spriteSheets.idle = idleImg;
                 resolve();
             };
             idleImg.onerror = () => {
@@ -75,85 +126,57 @@ class AudioSync {
             idleImg.src = 'images/idle.png';
         });
 
-        // Preload listening, thinking, and timer frames (NOT talking - that's done during THINKING)
-        const animations = [
-            { name: 'listening', count: 21, digits: 2 },
-            { name: 'thinking', count: 60, digits: 3 },
-            { name: 'timer', count: 75, digits: 3 }
-        ];
+        // Preload sprite sheets for listening, thinking, and timer (NOT talking - done during THINKING)
+        const spritesToLoad = ['listening', 'thinking', 'timer'];
 
-        let totalLoaded = 0;
-        const totalFrames = animations.reduce((sum, anim) => sum + anim.count, 0);
+        for (const name of spritesToLoad) {
+            console.log(`📥 Preloading ${name} sprite sheet...`);
+            const img = new Image();
 
-        for (const anim of animations) {
-            console.log(`📥 Preloading ${anim.name} (${anim.count} frames)...`);
-            const promises = [];
-
-            for (let i = 0; i < anim.count; i++) {
-                const paddedIndex = i.toString().padStart(anim.digits, '0');
-                const img = new Image();
-                const promise = new Promise((resolve, reject) => {
-                    img.onload = () => {
-                        totalLoaded++;
-                        resolve();
-                    };
-                    img.onerror = () => {
-                        console.error(`   Failed to load ${anim.name}/frame_${paddedIndex}.png`);
-                        reject(new Error(`Failed to load ${anim.name}/frame_${paddedIndex}.png`));
-                    };
-                });
-                img.src = `images/${anim.name}/frame_${paddedIndex}.png`;
-                this.preloadedImages[anim.name][i] = img;
-                promises.push(promise);
-            }
-
-            try {
-                await Promise.all(promises);
-                console.log(`   ✅ ${anim.name} frames loaded (${anim.count} frames)`);
-            } catch (error) {
-                console.error(`   ❌ Failed to load ${anim.name} frames:`, error);
-                throw error;
-            }
+            await new Promise((resolve, reject) => {
+                img.onload = () => {
+                    const metadata = this.spriteMetadata[name];
+                    const sizeMB = (img.width * img.height * 4 / (1024 * 1024)).toFixed(1);
+                    console.log(`   ✅ ${name} sprite loaded (${metadata.totalFrames} frames in 1 image)`);
+                    this.spriteSheets[name] = img;
+                    resolve();
+                };
+                img.onerror = () => {
+                    console.error(`   ❌ Failed to load ${name} sprite sheet`);
+                    reject(new Error(`Failed to load ${name} sprite sheet`));
+                };
+                img.src = `images/sprites/${name}_sprite.png`;
+            });
         }
 
         this.allFramesPreloaded = true;
-        console.log('✅ Essential animation frames preloaded successfully!');
-        console.log(`   Total: ${totalFrames + 1} frames loaded (idle + listening + thinking + timer)`);
+        console.log('✅ Essential sprite sheets preloaded successfully!');
+        console.log('   Using sprite sheets = Much faster loading over network!');
     }
 
-    // Preload talking frames during THINKING state
+    // Preload talking sprite sheet during THINKING state
     async preloadTalkingFrames() {
-        if (this.preloadedImages.talking.length > 0) {
-            console.log('✅ Talking frames already preloaded');
+        if (this.spriteSheets.talking) {
+            console.log('✅ Talking sprite already preloaded');
             return;
         }
 
-        console.log('📦 Preloading talking animation (60 frames)...');
-        const promises = [];
-        const totalFrames = 60;
+        console.log('📦 Preloading talking sprite sheet...');
 
-        for (let i = 0; i < totalFrames; i++) {
-            const paddedIndex = i.toString().padStart(3, '0');
-            const img = new Image();
-            const promise = new Promise((resolve, reject) => {
-                img.onload = () => resolve();
-                img.onerror = () => {
-                    console.error(`   Failed to load talking/frame_${paddedIndex}.png`);
-                    reject(new Error(`Failed to load talking/frame_${paddedIndex}.png`));
-                };
-            });
-            img.src = `images/talking/frame_${paddedIndex}.png`;
-            this.preloadedImages.talking[i] = img;
-            promises.push(promise);
-        }
-
-        try {
-            await Promise.all(promises);
-            console.log('✅ Talking frames preloaded successfully (60 frames)');
-        } catch (error) {
-            console.error('❌ Failed to preload talking frames:', error);
-            throw error;
-        }
+        const img = new Image();
+        await new Promise((resolve, reject) => {
+            img.onload = () => {
+                const metadata = this.spriteMetadata.talking;
+                console.log(`✅ Talking sprite loaded (${metadata.totalFrames} frames in 1 image)`);
+                this.spriteSheets.talking = img;
+                resolve();
+            };
+            img.onerror = () => {
+                console.error('❌ Failed to load talking sprite sheet');
+                reject(new Error('Failed to load talking sprite sheet'));
+            };
+            img.src = 'images/sprites/talking_sprite.png';
+        });
     }
 
     async initializeMicrophone() {
@@ -178,7 +201,7 @@ class AudioSync {
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
             this.analyser = this.audioContext.createAnalyser();
             this.analyser.fftSize = 256;
-            this.analyser.smoothingTimeConstant = 0.4; // Balanced: responsive but still smooth (0.4)
+            this.analyser.smoothingTimeConstant = 0.2; // Low smoothing for fast response (0-1, lower is faster)
 
             // Connect microphone to analyser
             this.microphone = this.audioContext.createMediaStreamSource(this.microphoneStream);
@@ -245,9 +268,9 @@ class AudioSync {
             const frameIndex = Math.floor((clampedVolume / 150) * 20);
             const paddedIndex = frameIndex.toString().padStart(2, '0');
 
-            // Draw preloaded image to canvas
-            if (this.preloadedImages.listening[frameIndex]) {
-                this.drawToCanvas(this.preloadedImages.listening[frameIndex]);
+            // Draw frame from sprite sheet
+            if (this.spriteSheets.listening && this.spriteMetadata) {
+                this.drawSpriteFrame(this.spriteSheets.listening, frameIndex, this.spriteMetadata.listening);
             }
 
             // Update debug panel (show smoothed volume)
@@ -331,9 +354,9 @@ class AudioSync {
         const animateThinking = () => {
             if (!this.isThinking) return;
 
-            // Draw preloaded image to canvas
-            if (this.preloadedImages.thinking[this.thinkingFrame]) {
-                this.drawToCanvas(this.preloadedImages.thinking[this.thinkingFrame]);
+            // Draw frame from sprite sheet
+            if (this.spriteSheets.thinking && this.spriteMetadata) {
+                this.drawSpriteFrame(this.spriteSheets.thinking, this.thinkingFrame, this.spriteMetadata.thinking);
             }
 
             // Format frame number with 3 digits (000-059)
@@ -356,7 +379,7 @@ class AudioSync {
             this.animationFrameId = setTimeout(() => animateThinking(), frameDelay);
         };
 
-        console.log('   Expected images: images/thinking/frame_000.png to frame_059.png');
+        console.log('   Using sprite sheet: images/sprites/thinking_sprite.png');
         console.log('   Playing at fixed 30 fps (33ms per frame)');
         animateThinking();
     }
@@ -372,7 +395,7 @@ class AudioSync {
     // Timer animation - 75 frames at 30fps (2.5 seconds)
     playTimerAnimation(avatarElement, onComplete) {
         console.log('⏱️ Starting custom timer animation (75 frames, 30fps)');
-        console.log(`   📁 Loading frames from: images/timer/frame_000.png to frame_074.png`);
+        console.log(`   Using sprite sheet: images/sprites/timer_sprite.png`);
 
         let currentFrame = 0;
         const totalFrames = 75;
@@ -381,16 +404,16 @@ class AudioSync {
 
         const playFrame = () => {
             if (currentFrame < totalFrames) {
-                // Draw preloaded image to canvas
-                if (this.preloadedImages.timer[currentFrame]) {
-                    this.drawToCanvas(this.preloadedImages.timer[currentFrame]);
+                // Draw frame from sprite sheet
+                if (this.spriteSheets.timer && this.spriteMetadata) {
+                    this.drawSpriteFrame(this.spriteSheets.timer, currentFrame, this.spriteMetadata.timer);
                 }
 
                 const paddedIndex = currentFrame.toString().padStart(3, '0');
 
                 // Log first frame to verify
                 if (currentFrame === 0) {
-                    console.log(`   🖼️ First frame rendered to canvas`);
+                    console.log(`   First frame rendered from sprite sheet`);
                 }
 
                 currentFrame++;
@@ -465,9 +488,9 @@ class AudioSync {
                 return;
             }
 
-            // Draw preloaded image to canvas for instant rendering
-            if (this.preloadedImages.talking[this.talkingFrame]) {
-                this.drawToCanvas(this.preloadedImages.talking[this.talkingFrame]);
+            // Draw frame from sprite sheet for instant rendering
+            if (this.spriteSheets.talking && this.spriteMetadata) {
+                this.drawSpriteFrame(this.spriteSheets.talking, this.talkingFrame, this.spriteMetadata.talking);
             }
 
             // Format frame number with 3 digits (000-059)
@@ -498,7 +521,7 @@ class AudioSync {
             this.animationFrameId = setTimeout(() => animateTalking(), frameDelay);
         };
 
-        console.log('   Expected images: images/talking/frame_000.png to frame_059.png');
+        console.log('   Using sprite sheet: images/sprites/talking_sprite.png');
         console.log('   Playing at constant 15 fps (67ms per frame)');
 
         animateTalking();

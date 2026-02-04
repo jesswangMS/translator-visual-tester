@@ -1,0 +1,38 @@
+{
+  "talking": {
+    "frameWidth": 900,
+    "frameHeight": 900,
+    "totalFrames": 60,
+    "framesPerRow": 10,
+    "numRows": 6,
+    "spriteWidth": 9000,
+    "spriteHeight": 5400
+  },
+  "thinking": {
+    "frameWidth": 900,
+    "frameHeight": 900,
+    "totalFrames": 60,
+    "framesPerRow": 10,
+    "numRows": 6,
+    "spriteWidth": 9000,
+    "spriteHeight": 5400
+  },
+  "timer": {
+    "frameWidth": 900,
+    "frameHeight": 900,
+    "totalFrames": 75,
+    "framesPerRow": 10,
+    "numRows": 8,
+    "spriteWidth": 9000,
+    "spriteHeight": 7200
+  },
+  "listening": {
+    "frameWidth": 900,
+    "frameHeight": 900,
+    "totalFrames": 21,
+    "framesPerRow": 7,
+    "numRows": 3,
+    "spriteWidth": 6300,
+    "spriteHeight": 2700
+  }
+}

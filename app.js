@@ -62,8 +62,8 @@ class TranslatorApp {
 
     showIdleImage() {
         // Draw idle image to canvas
-        if (audioSync.preloadedImages.idle) {
-            audioSync.drawToCanvas(audioSync.preloadedImages.idle);
+        if (audioSync.spriteSheets.idle) {
+            audioSync.drawToCanvas(audioSync.spriteSheets.idle);
         }
     }
 
@@ -1183,10 +1183,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     const app = new TranslatorApp();
     console.log('Translator app initialized');
 
+    // Avatar size slider handler
+    const avatarSizeSlider = document.getElementById('avatar-size');
+    const avatarSizeValue = document.getElementById('avatar-size-value');
+
+    if (avatarSizeSlider && avatarSizeValue) {
+        avatarSizeSlider.addEventListener('input', (e) => {
+            const value = parseInt(e.target.value);
+            avatarSizeValue.textContent = value + '%';
+            audioSync.avatarScale = value / 100; // Convert percentage to 0-1 scale
+
+            // Redraw current image to apply new scale immediately
+            app.showIdleImage();
+            console.log(`Avatar scale updated to ${value}%`);
+        });
+    }
+
     // Load and display idle image on startup
     const idleImg = new Image();
     idleImg.onload = () => {
-        audioSync.preloadedImages.idle = idleImg;
+        audioSync.spriteSheets.idle = idleImg;
         app.showIdleImage();
         console.log('✅ Idle image loaded and displayed');
     };

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sprite Sheet Test</title>
+    <style>
+        body {
+            background: #1a1a1a;
+            color: white;
+            font-family: monospace;
+            padding: 20px;
+        }
+        canvas {
+            border: 2px solid #4CAF50;
+            background: #2a2a2a;
+            display: block;
+            margin: 20px auto;
+        }
+        .controls {
+            text-align: center;
+            margin: 20px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #info {
+            text-align: center;
+            padding: 10px;
+            background: #2a2a2a;
+            border-radius: 5px;
+            margin: 20px auto;
+            max-width: 600px;
+        }
+    </style>
+</head>
+<body>
+    <h1 style="text-align: center;">Sprite Sheet Animation Test</h1>
+
+    <canvas id="testCanvas" width="400" height="400"></canvas>
+
+    <div class="controls">
+        <button onclick="testAnimation('listening')">Test Listening</button>
+        <button onclick="testAnimation('thinking')">Test Thinking</button>
+        <button onclick="testAnimation('talking')">Test Talking</button>
+        <button onclick="testAnimation('timer')">Test Timer</button>
+        <button onclick="stopTest()">Stop</button>
+    </div>
+
+    <div id="info">
+        <p>Status: <span id="status">Ready</span></p>
+        <p>Current Frame: <span id="frame">-</span></p>
+        <p>Animation: <span id="animation">None</span></p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('testCanvas');
+        const ctx = canvas.getContext('2d');
+        let currentAnimation = null;
+        let animationId = null;
+        let metadata = null;
+        let spriteSheets = {};
+
+        // Load metadata and sprite sheets
+        async function init() {
+            try {
+                const response = await fetch('images/sprites/metadata.json');
+                metadata = await response.json();
+                document.getElementById('status').textContent = 'Metadata loaded ✓';
+                console.log('Metadata loaded:', metadata);
+            } catch (error) {
+                document.getElementById('status').textContent = 'Failed to load metadata';
+                console.error('Error loading metadata:', error);
+            }
+        }
+
+        // Load a sprite sheet
+        async function loadSpriteSheet(name) {
+            if (spriteSheets[name]) return spriteSheets[name];
+
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    spriteSheets[name] = img;
+                    console.log(`${name} sprite loaded:`, img.width, 'x', img.height);
+                    resolve(img);
+                };
+                img.onerror = reject;
+                img.src = `images/sprites/${name}_sprite.png`;
+            });
+        }
+
+        // Draw a frame from sprite sheet
+        function drawSpriteFrame(sprite, frameIndex, meta) {
+            const { frameWidth, frameHeight, framesPerRow } = meta;
+
+            // Calculate position in sprite sheet
+            const col = frameIndex % framesPerRow;
+            const row = Math.floor(frameIndex / framesPerRow);
+            const sx = col * frameWidth;
+            const sy = row * frameHeight;
+
+            // Clear and draw
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(
+                sprite,
+                sx, sy, frameWidth, frameHeight,  // Source
+                0, 0, canvas.width, canvas.height  // Destination
+            );
+        }
+
+        // Test animation
+        async function testAnimation(name) {
+            stopTest();
+
+            document.getElementById('status').textContent = `Loading ${name}...`;
+            document.getElementById('animation').textContent = name;
+
+            try {
+                const sprite = await loadSpriteSheet(name);
+                const meta = metadata[name];
+
+                document.getElementById('status').textContent = `Playing ${name}`;
+
+                let frame = 0;
+                const fps = name === 'talking' ? 15 : 30;
+                const frameDelay = 1000 / fps;
+
+                function animate() {
+                    drawSpriteFrame(sprite, frame, meta);
+                    document.getElementById('frame').textContent = `${frame} / ${meta.totalFrames - 1}`;
+
+                    frame = (frame + 1) % meta.totalFrames;
+                    animationId = setTimeout(animate, frameDelay);
+                }
+
+                animate();
+
+            } catch (error) {
+                document.getElementById('status').textContent = 'Error loading sprite';
+                console.error('Error:', error);
+            }
+        }
+
+        function stopTest() {
+            if (animationId) {
+                clearTimeout(animationId);
+                animationId = null;
+            }
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            document.getElementById('frame').textContent = '-';
+            document.getElementById('animation').textContent = 'None';
+            document.getElementById('status').textContent = 'Stopped';
+        }
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>
