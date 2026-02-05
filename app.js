@@ -140,7 +140,7 @@ class TranslatorApp {
         this.azureRegionInput = document.getElementById('azure-region');
         this.transcriptionElement = document.getElementById('transcription');
         this.translationElement = document.getElementById('translation');
-        this.cooldownTimerElement = document.getElementById('cooldown-timer');
+        this.cooldownTimerElement = document.getElementById('cooldown-timer-display');
         this.cooldownTextElement = document.getElementById('cooldown-text');
         this.cooldownProgressElement = document.getElementById('cooldown-progress');
         this.stateDisplayElement = document.getElementById('state-display');
@@ -274,16 +274,9 @@ class TranslatorApp {
                 // Transition from IDLE to LISTENING immediately when speech detected
                 if (this.currentState === States.IDLE && this.isActive) {
                     console.log('🎤 Speech detected in IDLE - transitioning to LISTENING');
-                    // Clear any leftover silence timer
-                    if (this.silenceTimer) {
-                        clearTimeout(this.silenceTimer);
-                        this.silenceTimer = null;
-                        console.log('🧹 Cleared leftover silence timer (speech recognition)');
-                    }
                     this.setState(States.LISTENING);
-                    // CRITICAL: Start animation and reset timing for volume monitoring
+                    // Start animation for volume monitoring
                     audioSync.startListeningAnimation(this.avatarElement);
-                    this.lastVolumeTime = Date.now();
                 }
 
                 // Handle interim results
@@ -430,96 +423,58 @@ class TranslatorApp {
                 }
                 this.transcriptionElement.textContent = this.lastTranscript;
 
-                // Note: State transitions now handled by volume detection, not Azure events
-                // Azure just provides the transcript during LISTENING/WAITING
-                if (this.currentState === States.LISTENING && false) { // Disabled - volume handles transitions
-                    console.log(`⏱️ Final speech detected - validating before translation`);
+                // LISTENING → WAITING: Only when we have valid recognized speech
+                if (this.currentState === States.LISTENING) {
+                    console.log(`⏱️ Final speech detected - validating before entering WAITING`);
 
                     // Validate the speech before processing
                     if (!this.validateSpeech(this.lastTranscript)) {
-                        console.log('❌ Speech validation failed - ignoring and staying in LISTENING state');
-                    console.log(`   Rejected text: "${this.lastTranscript}"`);
-                    // Clear the invalid transcript and stay in LISTENING state
-                    this.lastTranscript = '';
-                    this.transcriptionElement.textContent = '';
-                    // Restart no-audio timer to give user another chance
-                    this.startNoAudioTimer();
-                    return;
-                }
-
-                console.log(`✅ Speech validated - entering WAITING state for ${this.cooldownDuration}ms`);
-
-                // Enter WAITING state immediately (setState will auto-clear no-audio timer)
-                this.setState(States.WAITING);
-
-                // Stop listening animation but keep monitoring volume for interruptions
-                audioSync.stopListeningAnimation();
-                audioSync.startVolumeMonitoring();
-
-                // Register volume callback to detect speech immediately
-                // Using a higher threshold during WAITING to avoid false triggers from residual noise
-                const waitingVolumeThreshold = 50; // Higher than listening threshold (30)
-                audioSync.setVolumeCallback((volume) => {
-                    // Only interrupt if in WAITING state and volume is above waiting threshold
-                    if (this.currentState === States.WAITING && volume > waitingVolumeThreshold) {
-                        console.log(`🔊 Volume detected during WAITING: ${volume.toFixed(1)} (threshold: ${waitingVolumeThreshold}) - interrupting timer!`);
-                        this.interruptWaitingState();
+                        console.log('❌ Speech validation failed - staying in LISTENING state');
+                        console.log(`   Rejected text: "${this.lastTranscript}"`);
+                        // Clear the invalid transcript and stay in LISTENING state
+                        this.lastTranscript = '';
+                        this.transcriptionElement.textContent = '';
+                        return;
                     }
-                });
 
-                // Start custom timer animation (75 frames, 30fps, 2.5 seconds) - only if enabled
-                if (this.showTimer) {
-                    console.log('⏱️ Timer animation is ENABLED - playing timer frames');
-                    audioSync.playTimerAnimation(this.avatarElement, this.cooldownDuration, () => {
-                        // Timer animation complete - validate and start translation
-                        console.log('✅ Timer animation complete - validating before translation');
-                        console.log(`   Final transcript: "${this.lastTranscript}"`);
-                        audioSync.clearVolumeCallback();
+                    console.log(`✅ Speech validated - entering WAITING state for ${this.cooldownDuration}ms`);
 
-                        // Validate before translation
-                        if (this.lastTranscript && this.validateSpeech(this.lastTranscript)) {
-                            this.handleTranslation(this.lastTranscript);
-                        } else {
-                            console.error('❌ ERROR: Speech validation failed or empty transcript - returning to IDLE');
-                            this.lastTranscript = '';
-                            this.transcriptionElement.textContent = '';
-                            this.setState(States.IDLE);
-                            this.showIdleImage();
-                            // Restart recognition
-                            // Azure continuous recognition stays running automatically
-                        }
-                    });
-                } else {
-                    console.log('⏱️ Timer animation is DISABLED - skipping timer frames');
-                }
+                    // Enter WAITING state immediately
+                    this.setState(States.WAITING);
 
-                // Use setTimeout as backup when timer is disabled, or for interruption tracking
-                this.translationTimer = setTimeout(() => {
-                    // Only proceed if timer animation is disabled
-                    // (If timer is enabled, the animation callback handles translation)
-                    if (!this.showTimer) {
-                        console.log('✅ Waiting complete - validating before translation (no timer animation)');
-                        console.log(`   Final transcript: "${this.lastTranscript}"`);
-                        audioSync.clearVolumeCallback();
+                    // Stop listening animation but keep monitoring volume for interruptions
+                    audioSync.stopListeningAnimation();
+                    audioSync.startVolumeMonitoring();
 
-                        // Validate before translation
-                        if (this.lastTranscript && this.validateSpeech(this.lastTranscript)) {
-                            this.handleTranslation(this.lastTranscript);
-                        } else {
-                            console.error('❌ ERROR: Speech validation failed or empty transcript - returning to IDLE');
-                            this.lastTranscript = '';
-                            this.transcriptionElement.textContent = '';
-                            this.setState(States.IDLE);
-                            this.showIdleImage();
-                            // Restart recognition
-                            // Azure continuous recognition stays running automatically
-                        }
+                    // Start cooldown timer
+                    if (this.showTimer) {
+                        audioSync.playTimerAnimation(this.avatarElement, this.cooldownDuration, () => {
+                            console.log('✅ Timer complete - entering THINKING');
+                            this.setState(States.THINKING);
+                            audioSync.stopVolumeMonitoring();
+                            audioSync.startThinkingAnimation(this.avatarElement);
+
+                            // Translate (speech already validated)
+                            setTimeout(() => {
+                                this.handleTranslation(this.lastTranscript);
+                            }, 100);
+                        });
                     } else {
-                        console.log('⏱️ setTimeout completed but timer animation is handling translation');
-                    }
-                }, this.cooldownDuration);
+                        // Backup timeout if timer disabled
+                        setTimeout(() => {
+                            if (this.currentState === States.WAITING) {
+                                console.log('✅ Cooldown complete - entering THINKING');
+                                this.setState(States.THINKING);
+                                audioSync.stopVolumeMonitoring();
+                                audioSync.startThinkingAnimation(this.avatarElement);
 
-                    console.log(`   - Waiting state entered. Timer ID: ${this.translationTimer}`);
+                                // Translate (speech already validated)
+                                setTimeout(() => {
+                                    this.handleTranslation(this.lastTranscript);
+                                }, 100);
+                            }
+                        }, this.cooldownDuration);
+                    }
                 }
 
             } catch (error) {
@@ -631,11 +586,8 @@ class TranslatorApp {
             // Start listening animation for volume monitoring (will transition to LISTENING on speech)
             audioSync.startListeningAnimation(this.avatarElement);
 
-            // Set up volume callback for instant state transitions based on volume
-            // Use instance variables so speech recognition handlers can access them
-            this.silenceTimer = null;
-            this.lastVolumeTime = Date.now();
-            const silenceThreshold = 500; // 500ms of silence triggers cooldown
+            // Set up volume callback for state transitions based on volume
+            // Speech recognition (not silence) triggers LISTENING → WAITING
 
             audioSync.setVolumeCallback((volume) => {
                 if (!this.isActive) return;
@@ -645,89 +597,13 @@ class TranslatorApp {
                 // IDLE → LISTENING: Instant transition when volume detected
                 if (this.currentState === States.IDLE && volume > threshold) {
                     console.log(`🔊 Volume detected (${volume.toFixed(1)}) - transitioning to LISTENING`);
-                    // Clear any leftover silence timer from previous cycle
-                    if (this.silenceTimer) {
-                        clearTimeout(this.silenceTimer);
-                        this.silenceTimer = null;
-                        console.log('🧹 Cleared leftover silence timer');
-                    }
                     this.setState(States.LISTENING);
                     audioSync.startListeningAnimation(this.avatarElement);
-                    this.lastVolumeTime = Date.now();
                 }
 
-                // LISTENING: Monitor for silence to trigger cooldown
+                // LISTENING: Just monitor volume, speech recognition will trigger WAITING
                 else if (this.currentState === States.LISTENING) {
-                    if (volume > threshold) {
-                        // Voice detected, reset silence timer
-                        this.lastVolumeTime = Date.now();
-                        if (this.silenceTimer) {
-                            clearTimeout(this.silenceTimer);
-                            this.silenceTimer = null;
-                        }
-                    } else {
-                        // Check if we've been silent long enough
-                        const silenceDuration = Date.now() - this.lastVolumeTime;
-
-                        // Debug: Warn if stuck in LISTENING for too long
-                        if (silenceDuration > 5000 && silenceDuration % 1000 < 20) {
-                            console.warn(`⚠️ Still in LISTENING after ${(silenceDuration/1000).toFixed(1)}s - volume: ${volume.toFixed(1)}, threshold: ${threshold}, silenceTimer: ${this.silenceTimer ? 'EXISTS' : 'NULL'}`);
-                        }
-
-                        if (silenceDuration >= silenceThreshold && !this.silenceTimer) {
-                            console.log(`🔇 Silence detected (${silenceDuration}ms) - starting cooldown`);
-                            // Transition to WAITING immediately
-                            this.setState(States.WAITING);
-                            audioSync.stopListeningAnimation();
-                            audioSync.startVolumeMonitoring();
-
-                            // Start cooldown timer
-                            if (this.showTimer) {
-                                audioSync.playTimerAnimation(this.avatarElement, this.cooldownDuration, () => {
-                                    console.log('✅ Timer complete - entering THINKING');
-                                    this.setState(States.THINKING);
-                                    audioSync.stopVolumeMonitoring();
-                                    audioSync.startThinkingAnimation(this.avatarElement);
-
-                                    // Get transcript and translate
-                                    setTimeout(() => {
-                                        const transcript = this.lastTranscript || '';
-                                        if (transcript && this.validateSpeech(transcript)) {
-                                            this.handleTranslation(transcript);
-                                        } else {
-                                            console.error('❌ No valid transcript - returning to IDLE');
-                                            this.setState(States.IDLE);
-                                            this.showIdleImage();
-                                            audioSync.stopThinkingAnimation();
-                                        }
-                                    }, 100);
-                                });
-                            } else {
-                                // Backup timeout if timer disabled - store reference so it can be cancelled
-                                this.silenceTimer = setTimeout(() => {
-                                    if (this.currentState === States.WAITING) {
-                                        console.log('✅ Cooldown complete (backup timeout) - entering THINKING');
-                                        this.setState(States.THINKING);
-                                        audioSync.stopVolumeMonitoring();
-                                        audioSync.startThinkingAnimation(this.avatarElement);
-
-                                        setTimeout(() => {
-                                            const transcript = this.lastTranscript || '';
-                                            if (transcript && this.validateSpeech(transcript)) {
-                                                this.handleTranslation(transcript);
-                                            } else {
-                                                console.error('❌ No valid transcript - returning to IDLE');
-                                                this.setState(States.IDLE);
-                                                this.showIdleImage();
-                                                audioSync.stopThinkingAnimation();
-                                            }
-                                        }, 100);
-                                    }
-                                    this.silenceTimer = null;
-                                }, this.cooldownDuration);
-                            }
-                        }
-                    }
+                    // No action needed - speech recognition handles LISTENING → WAITING transition
                 }
 
                 // WAITING: Monitor for interruption
@@ -737,15 +613,8 @@ class TranslatorApp {
                         // Cancel timers and return to LISTENING
                         audioSync.stopTimerAnimation();
                         audioSync.stopVolumeMonitoring();
-                        // Clear silence timer if it exists
-                        if (this.silenceTimer) {
-                            clearTimeout(this.silenceTimer);
-                            this.silenceTimer = null;
-                            console.log('🧹 Cleared silence timer due to interruption');
-                        }
                         this.setState(States.LISTENING);
                         audioSync.startListeningAnimation(this.avatarElement);
-                        this.lastVolumeTime = Date.now();
                     }
                 }
             });
@@ -1348,23 +1217,67 @@ class TranslatorApp {
                                 console.log('🎙️ Azure TTS playback started - entering TALKING state');
                                 this.setState(States.TALKING);
 
-                                // Start animation with volume analysis
+                                // Start animation with volume analysis (AE-style)
                                 const dataArray = new Uint8Array(analyser.frequencyBinCount);
-                                let currentSpeed = 1.0;
-                                const easingFactor = 0.2;
+
+                                // AE-style parameters
+                                const threshold = 0.01;      // Almost zero threshold to distinguish silence vs sound
+                                const slowSpeed = 1.0;       // Speed when basically silent
+                                const minFastSpeed = 1.0;    // Min speed when sound is present
+                                const maxFastSpeed = 8.0;    // Max speed when loud
+                                const maxAmp = 20.0;         // Max amplitude for mapping
+                                const samples = 5;           // Number of samples for smoothing
+                                const smoothDuration = 200;  // 200ms smoothing window
+
+                                // Store recent amplitude samples for smoothing
+                                const ampHistory = [];
+                                const sampleInterval = smoothDuration / samples;
+                                let lastSampleTime = Date.now();
+
+                                // Ease in/out function for smooth speed transitions
+                                const easeInOut = (t, inVal, outVal, minSpeed, maxSpeed) => {
+                                    if (t <= inVal) return minSpeed;
+                                    if (t >= outVal) return maxSpeed;
+                                    const normalized = (t - inVal) / (outVal - inVal);
+                                    const eased = normalized < 0.5
+                                        ? 2 * normalized * normalized
+                                        : 1 - Math.pow(-2 * normalized + 2, 2) / 2;
+                                    return minSpeed + (maxSpeed - minSpeed) * eased;
+                                };
 
                                 const getVolumeMultiplier = () => {
+                                    // Get current volume
                                     analyser.getByteFrequencyData(dataArray);
                                     const sum = dataArray.reduce((a, b) => a + b, 0);
                                     const average = sum / dataArray.length;
                                     const max = Math.max(...dataArray);
                                     const volume = (average * 0.5) + (max * 0.5);
+                                    const amp = Math.min(volume, 255) / 255 * maxAmp; // Normalize to 0-20 range
 
-                                    const normalizedVolume = Math.min(volume, 255) / 255;
-                                    const targetSpeed = 1.0 + (normalizedVolume * (audioSync.maxAnimationSpeed - 1));
-                                    currentSpeed += (targetSpeed - currentSpeed) * easingFactor;
+                                    // Add to history with timestamp
+                                    const now = Date.now();
+                                    ampHistory.push({ time: now, amp: amp });
 
-                                    return currentSpeed;
+                                    // Remove old samples outside smoothing window
+                                    const cutoffTime = now - smoothDuration;
+                                    while (ampHistory.length > 0 && ampHistory[0].time < cutoffTime) {
+                                        ampHistory.shift();
+                                    }
+
+                                    // Calculate smoothed amplitude (average of recent samples)
+                                    const totalAmp = ampHistory.reduce((sum, sample) => sum + sample.amp, 0);
+                                    const smoothed = ampHistory.length > 0 ? totalAmp / ampHistory.length : 0;
+
+                                    // Determine speed based on threshold
+                                    let speed;
+                                    if (smoothed < threshold) {
+                                        speed = slowSpeed;
+                                    } else {
+                                        // Map amplitude from threshold..maxAmp to minFastSpeed..maxFastSpeed
+                                        speed = easeInOut(smoothed, threshold, maxAmp, minFastSpeed, maxFastSpeed);
+                                    }
+
+                                    return speed;
                                 };
 
                                 audioSync.startTalkingAnimation(this.avatarElement, getVolumeMultiplier);
@@ -1746,14 +1659,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (cooldownSlider && cooldownValue) {
         console.log('✅ Attaching cooldown slider handler');
+        console.log(`   Current value: ${cooldownSlider.value}ms`);
+        console.log(`   App cooldown: ${app.cooldownDuration}ms`);
+
+        // Initialize display with current app value
+        cooldownValue.textContent = (app.cooldownDuration / 1000).toFixed(1) + 's';
+        cooldownSlider.value = app.cooldownDuration;
+
         cooldownSlider.addEventListener('input', (e) => {
             const value = parseInt(e.target.value);
             app.cooldownDuration = value;
             cooldownValue.textContent = (value / 1000).toFixed(1) + 's';
-            console.log(`🎛️ Cooldown duration updated to ${value}ms (${(value / 1000).toFixed(1)}s)`);
+            console.log(`🎛️ Cooldown duration changed: ${value}ms (${(value / 1000).toFixed(1)}s)`);
+            console.log(`   App cooldownDuration is now: ${app.cooldownDuration}ms`);
         });
     } else {
         console.error('❌ Cooldown slider elements not found!');
+        console.error(`   Slider: ${cooldownSlider}, Value display: ${cooldownValue}`);
     }
 
     // Microphone sensitivity slider handler

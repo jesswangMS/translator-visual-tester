@@ -21,7 +21,7 @@
         <div class="avatar-container">
             <canvas id="avatar" width="900" height="900" style="width: 100%; height: auto; max-width: 400px;"></canvas>
             <div id="status-text" class="status-text">Ready</div>
-            <div id="cooldown-timer" class="cooldown-timer" style="display: none;">
+            <div id="cooldown-timer-display" class="cooldown-timer" style="display: none;">
                 <div class="cooldown-circle">
                     <svg width="60" height="60">
                         <circle cx="30" cy="30" r="25" fill="none" stroke="#e0e0e0" stroke-width="4"/>
@@ -151,13 +151,13 @@
 
             <!-- Microphone Sensitivity Slider -->
             <div class="api-key-section">
-                <label for="mic-sensitivity">Microphone Sensitivity: <span id="mic-sensitivity-value">25</span></label>
+                <label for="mic-sensitivity">Microphone Sensitivity: <span id="mic-sensitivity-value">35</span></label>
                 <input
                     type="range"
                     id="mic-sensitivity"
                     min="10"
                     max="50"
-                    value="25"
+                    value="35"
                     step="5"
                     style="width: 100%;"
                 >

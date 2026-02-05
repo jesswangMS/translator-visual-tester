@@ -470,11 +470,13 @@ h1 {
 .state-thinking #avatar {
     opacity: 1;
     transform: scale(0.9); /* 90% scale for thinking */
+    transition: opacity 0.05s ease, transform 0.3s ease-in-out; /* Smooth scale transition from WAITING */
 }
 
 .state-talking #avatar {
     opacity: 1;
     transform: scale(1.0); /* 100% scale for talking */
+    transition: opacity 0.05s ease, transform 0.3s ease-in-out; /* Smooth scale transition from THINKING */
 }
 
 /* Purple border for talking state */

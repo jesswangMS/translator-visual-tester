@@ -17,7 +17,7 @@ class AudioSync {
         this.talkingFrame = 0;
         this.isMicrophoneInitialized = false;
         this.volumeCallback = null; // Callback for volume detection
-        this.volumeThreshold = 25; // Threshold to detect speech (lower = more sensitive, higher = less sensitive)
+        this.volumeThreshold = 35; // Threshold to detect speech (lower = more sensitive, higher = less sensitive)
         this.loopCount = 0; // Track animation loops
         this.smoothedVolume = 0; // Smoothed volume for listening animation
         this.volumeSmoothingFactor = 0.85; // Higher = faster response to volume changes (0-1, higher is faster)
@@ -372,20 +372,20 @@ class AudioSync {
                 this.drawSpriteFrame(this.spriteSheets.thinking, this.thinkingFrame, this.spriteMetadata.thinking);
             }
 
-            // Format frame number with 3 digits (000-059)
+            // Format frame number with 3 digits (000-119)
             const paddedFrame = this.thinkingFrame.toString().padStart(3, '0');
 
             // Update debug panel
             const frameDisplay = `frame_${paddedFrame}`;
             this.updateDebugPanel(0, frameDisplay, null, 'Thinking');
 
-            // Move to next frame and loop
-            this.thinkingFrame = (this.thinkingFrame + 1) % 60;
+            // Move to next frame and loop (120 frames total)
+            this.thinkingFrame = (this.thinkingFrame + 1) % 120;
 
             // Log every 30 frames (once per second at 30 fps)
             logCounter++;
             if (logCounter % 30 === 0) {
-                console.log(`🤔 Thinking - Fixed 30 fps, Frame: ${paddedFrame}, Loop #${Math.floor(logCounter / 60)}`);
+                console.log(`🤔 Thinking - Fixed 30 fps, Frame: ${paddedFrame}, Loop #${Math.floor(logCounter / 120)}`);
             }
 
             // Continue animation at fixed rate
@@ -405,14 +405,17 @@ class AudioSync {
         }
     }
 
-    // Timer animation - 75 frames at 30fps (2.5 seconds)
+    // Timer animation - 80 frames (duration is adjustable 1000-2500ms)
     playTimerAnimation(avatarElement, duration, onComplete) {
-        const totalFrames = 75;
+        const totalFrames = 80;
         const frameDelay = duration / totalFrames; // Dynamic frame delay based on duration
         const fps = (1000 / frameDelay).toFixed(1); // Calculate effective FPS
 
-        console.log(`⏱️ Starting timer animation (${totalFrames} frames over ${duration}ms, ${fps} fps)`);
+        console.log(`⏱️ Starting timer animation`);
+        console.log(`   Duration: ${duration}ms (${(duration/1000).toFixed(1)}s)`);
+        console.log(`   Total frames: ${totalFrames}`);
         console.log(`   Frame delay: ${frameDelay.toFixed(1)}ms per frame`);
+        console.log(`   Effective FPS: ${fps}`);
         console.log(`   Using sprite sheet: images/sprites/timer_sprite.png`);
 
         let currentFrame = 0;
@@ -481,7 +484,7 @@ class AudioSync {
         }
 
         const useDynamicSpeed = getRateMultiplier !== null;
-        console.log(`🗣️ Starting talking animation (${useDynamicSpeed ? 'DYNAMIC 1x-10x speed' : 'constant 15fps'})`);
+        console.log(`🗣️ Starting talking animation (${useDynamicSpeed ? 'DYNAMIC 1x-8x speed (AE-style)' : 'constant 15fps'})`);
         console.log('   Using canvas rendering for instant frame updates');
 
         this.isTalking = true;
@@ -555,7 +558,7 @@ class AudioSync {
 
         console.log('   Using sprite sheet: images/sprites/talking_sprite.png');
         if (useDynamicSpeed) {
-            console.log('   Speed adjusts 1x-10x based on audio volume (DRAMATIC range)');
+            console.log('   Speed adjusts 1x-8x based on audio volume (AE-style with threshold)');
         } else {
             console.log('   Playing at constant 15 fps (67ms per frame)');
         }

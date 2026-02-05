@@ -1,0 +1,16 @@
+{
+  "thinking": {
+    "totalFrames": 120,
+    "frameWidth": 900,
+    "frameHeight": 900,
+    "framesPerRow": 12,
+    "rows": 10
+  },
+  "timer": {
+    "totalFrames": 80,
+    "frameWidth": 900,
+    "frameHeight": 900,
+    "framesPerRow": 10,
+    "rows": 8
+  }
+}
