@@ -26,7 +26,7 @@ class TranslatorApp {
         this.showTimer = true; // Timer animation visibility toggle (default: show)
         this.lastResultIndex = 0; // Track which results we've already processed
         this.noAudioTimer = null; // Timer for detecting no audio in LISTENING state
-        this.noAudioTimeout = 5000; // 5 seconds of no audio before returning to IDLE
+        this.noAudioTimeout = 500; // 0.5 seconds of no audio before returning to IDLE
         this.interimResultTimer = null; // Timer to finalize interim results if no final result comes
         this.interimResultTimeout = 2000; // 2 seconds after last interim result, treat as final
         this.audioContext = null; // Web Audio API context for audio analysis
@@ -412,7 +412,7 @@ class TranslatorApp {
                     return;
                 }
 
-                // Accumulate final transcripts
+                // Accumulate final transcripts (volume-based transitions will handle state changes)
                 if (this.lastTranscript && this.lastTranscript.trim() !== '') {
                     this.lastTranscript = this.lastTranscript + ' ' + transcript;
                     console.log(`📝 Accumulated final transcript: "${this.lastTranscript}"`);
@@ -421,8 +421,9 @@ class TranslatorApp {
                 }
                 this.transcriptionElement.textContent = this.lastTranscript;
 
-                // If in LISTENING state → go to WAITING state
-                if (this.currentState === States.LISTENING) {
+                // Note: State transitions now handled by volume detection, not Azure events
+                // Azure just provides the transcript during LISTENING/WAITING
+                if (this.currentState === States.LISTENING && false) { // Disabled - volume handles transitions
                     console.log(`⏱️ Final speech detected - validating before translation`);
 
                     // Validate the speech before processing
@@ -614,12 +615,126 @@ class TranslatorApp {
                 }
             );
 
-            // Go directly to LISTENING state for instant response
-            this.setState(States.LISTENING);
-            this.updateButton();
+            // Start in IDLE state - will transition to LISTENING when user speaks
+            this.setState(States.IDLE);
+            this.showIdleImage();
 
-            // Start listening animation immediately
+            // Start listening animation for volume monitoring (will transition to LISTENING on speech)
             audioSync.startListeningAnimation(this.avatarElement);
+
+            // Set up volume callback for instant state transitions based on volume
+            let silenceTimer = null;
+            let lastVolumeTime = Date.now();
+            const silenceThreshold = 500; // 500ms of silence triggers cooldown
+
+            audioSync.setVolumeCallback((volume) => {
+                if (!this.isActive) return;
+
+                const threshold = audioSync.volumeThreshold; // Use configurable threshold
+
+                // IDLE → LISTENING: Instant transition when volume detected
+                if (this.currentState === States.IDLE && volume > threshold) {
+                    console.log(`🔊 Volume detected (${volume.toFixed(1)}) - transitioning to LISTENING`);
+                    this.setState(States.LISTENING);
+                    audioSync.startListeningAnimation(this.avatarElement);
+                    lastVolumeTime = Date.now();
+                }
+
+                // LISTENING: Monitor for silence to trigger cooldown
+                else if (this.currentState === States.LISTENING) {
+                    if (volume > threshold) {
+                        // Voice detected, reset silence timer
+                        lastVolumeTime = Date.now();
+                        if (silenceTimer) {
+                            clearTimeout(silenceTimer);
+                            silenceTimer = null;
+                        }
+                    } else {
+                        // Check if we've been silent long enough
+                        const silenceDuration = Date.now() - lastVolumeTime;
+                        if (silenceDuration >= silenceThreshold && !silenceTimer) {
+                            console.log(`🔇 Silence detected (${silenceDuration}ms) - starting cooldown`);
+                            // Transition to WAITING immediately
+                            this.setState(States.WAITING);
+                            audioSync.stopListeningAnimation();
+                            audioSync.startVolumeMonitoring();
+
+                            // Start cooldown timer
+                            if (this.showTimer) {
+                                audioSync.playTimerAnimation(this.avatarElement, this.cooldownDuration, () => {
+                                    console.log('✅ Timer complete - entering THINKING');
+                                    // Clear the backup timeout since timer completed
+                                    if (silenceTimer) {
+                                        clearTimeout(silenceTimer);
+                                        silenceTimer = null;
+                                    }
+                                    this.setState(States.THINKING);
+                                    audioSync.stopVolumeMonitoring();
+                                    audioSync.startThinkingAnimation(this.avatarElement);
+
+                                    // Get transcript and translate
+                                    setTimeout(() => {
+                                        const transcript = this.lastTranscript || '';
+                                        if (transcript && this.validateSpeech(transcript)) {
+                                            this.handleTranslation(transcript);
+                                        } else {
+                                            console.error('❌ No valid transcript - returning to IDLE');
+                                            this.setState(States.IDLE);
+                                            this.showIdleImage();
+                                            audioSync.stopThinkingAnimation();
+                                        }
+                                    }, 100);
+                                });
+                            }
+
+                            // Backup timeout if timer disabled - store reference so it can be cancelled
+                            silenceTimer = setTimeout(() => {
+                                if (this.currentState === States.WAITING) {
+                                    console.log('✅ Cooldown complete (backup timeout) - entering THINKING');
+                                    this.setState(States.THINKING);
+                                    audioSync.stopVolumeMonitoring();
+                                    audioSync.startThinkingAnimation(this.avatarElement);
+
+                                    setTimeout(() => {
+                                        const transcript = this.lastTranscript || '';
+                                        if (transcript && this.validateSpeech(transcript)) {
+                                            this.handleTranslation(transcript);
+                                        } else {
+                                            console.error('❌ No valid transcript - returning to IDLE');
+                                            this.setState(States.IDLE);
+                                            this.showIdleImage();
+                                            audioSync.stopThinkingAnimation();
+                                        }
+                                    }, 100);
+                                }
+                                silenceTimer = null;
+                            }, this.cooldownDuration);
+                        }
+                    }
+                }
+
+                // WAITING: Monitor for interruption
+                else if (this.currentState === States.WAITING) {
+                    if (volume > threshold) {
+                        console.log(`🔊 Audio detected during WAITING (${volume.toFixed(1)}) - returning to LISTENING`);
+                        // Cancel timers and return to LISTENING
+                        audioSync.stopTimerAnimation();
+                        audioSync.stopVolumeMonitoring();
+                        this.setState(States.LISTENING);
+                        audioSync.startListeningAnimation(this.avatarElement);
+                        lastVolumeTime = Date.now();
+                    }
+                }
+            });
+
+            // Delay button update by 500ms to match microphone initialization period
+            // This keeps "Start Session" showing until system is fully ready
+            setTimeout(() => {
+                if (this.isActive) {
+                    this.updateButton();
+                    console.log('✅ System fully initialized and ready');
+                }
+            }, 500);
         } catch (error) {
             console.error('Error starting listening:', error);
             alert(error.message);
@@ -798,6 +913,10 @@ class TranslatorApp {
     }
 
     startNoAudioTimer() {
+        // DEPRECATED: No longer used - volume-based detection handles state transitions
+        // Kept for legacy compatibility but does nothing
+        return;
+
         // Clear any existing timer
         this.clearNoAudioTimer();
 
@@ -1154,12 +1273,12 @@ class TranslatorApp {
                 };
                 speechConfig.speechSynthesisVoiceName = voiceMap[lang] || voiceMap['en-US'];
 
-                // Create synthesizer with NO audio output (we'll play it manually through Web Audio API)
-                // This prevents the double audio issue where Azure plays AND Web Audio API plays
-                const audioConfig = null; // No automatic audio playback
-                const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig, audioConfig);
+                // Create synthesizer (Azure plays audio automatically)
+                const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig);
+                console.log('🔊 Created Azure synthesizer - will play audio once');
 
                 // Synthesize speech
+                console.log('🗣️ Calling speakTextAsync...');
                 synthesizer.speakTextAsync(
                     text,
                     async (result) => {
@@ -1196,7 +1315,8 @@ class TranslatorApp {
 
                                 source.buffer = audioBuffer;
                                 source.connect(analyser);
-                                analyser.connect(this.audioContext.destination);
+                                // DON'T connect to destination - Azure already plays, we just analyze volume
+                                // analyser.connect(this.audioContext.destination);
 
                                 this.currentAudioSource = source;
 
@@ -1217,7 +1337,7 @@ class TranslatorApp {
                                     const volume = (average * 0.5) + (max * 0.5);
 
                                     const normalizedVolume = Math.min(volume, 255) / 255;
-                                    const targetSpeed = 1.0 + (normalizedVolume * 9.0);
+                                    const targetSpeed = 1.0 + (normalizedVolume * (audioSync.maxAnimationSpeed - 1));
                                     currentSpeed += (targetSpeed - currentSpeed) * easingFactor;
 
                                     return currentSpeed;
@@ -1239,12 +1359,24 @@ class TranslatorApp {
                                     // Return to IDLE
                                     if (this.isActive) {
                                         this.setState(States.IDLE);
+
+                                        // CRITICAL: Restart recognition after TTS ends
+                                        console.log('🔄 Restarting speech recognition...');
+                                        this.recognition.startContinuousRecognitionAsync(
+                                            () => console.log('✅ Recognition restarted successfully'),
+                                            (error) => console.error('❌ Failed to restart recognition:', error)
+                                        );
+
+                                        // Restart listening animation immediately for instant response
+                                        console.log('🎤 Restarting listening animation for continuous volume monitoring');
+                                        audioSync.startListeningAnimation(this.avatarElement);
                                     }
 
                                     synthesizer.close();
                                     resolve();
                                 };
 
+                                // Start source for volume analysis (even though not connected to speakers)
                                 source.start(0);
                             } catch (audioError) {
                                 console.error('❌ Audio processing failed:', audioError);
@@ -1464,9 +1596,11 @@ class TranslatorApp {
         }
 
         // Handle no audio timer based on state
+        // Note: Volume-based silence detection handles LISTENING → WAITING transition
+        // No direct LISTENING → IDLE transition
         if (newState === States.LISTENING) {
-            // Start no audio timer when entering LISTENING
-            this.startNoAudioTimer();
+            // No timer needed - volume detection handles transitions
+            // this.startNoAudioTimer(); // DISABLED
         } else {
             // Clear timer when leaving LISTENING state
             this.clearNoAudioTimer();
@@ -1559,6 +1693,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const app = new TranslatorApp();
     console.log('Translator app initialized');
 
+    // ===== Setup UI Controls First (before microphone init) =====
+    console.log('🎛️ Setting up UI controls...');
+
     // Avatar size slider handler
     const avatarSizeSlider = document.getElementById('avatar-size');
     const avatarSizeValue = document.getElementById('avatar-size-value');
@@ -1579,13 +1716,56 @@ document.addEventListener('DOMContentLoaded', async () => {
     const cooldownSlider = document.getElementById('cooldown-timer');
     const cooldownValue = document.getElementById('cooldown-timer-value');
 
+    console.log('🎛️ Cooldown slider elements:', { slider: cooldownSlider, value: cooldownValue });
+
     if (cooldownSlider && cooldownValue) {
+        console.log('✅ Attaching cooldown slider handler');
         cooldownSlider.addEventListener('input', (e) => {
             const value = parseInt(e.target.value);
             app.cooldownDuration = value;
             cooldownValue.textContent = (value / 1000).toFixed(1) + 's';
-            console.log(`Cooldown duration updated to ${value}ms (${(value / 1000).toFixed(1)}s)`);
+            console.log(`🎛️ Cooldown duration updated to ${value}ms (${(value / 1000).toFixed(1)}s)`);
         });
+    } else {
+        console.error('❌ Cooldown slider elements not found!');
+    }
+
+    // Microphone sensitivity slider handler
+    const micSensitivitySlider = document.getElementById('mic-sensitivity');
+    const micSensitivityValue = document.getElementById('mic-sensitivity-value');
+
+    if (micSensitivitySlider && micSensitivityValue) {
+        micSensitivitySlider.addEventListener('input', (e) => {
+            const value = parseInt(e.target.value);
+            audioSync.volumeThreshold = value;
+            micSensitivityValue.textContent = value;
+            console.log(`Microphone sensitivity updated to ${value} (higher = less sensitive)`);
+        });
+    }
+
+    // Animation speed slider handler
+    const animationSpeedSlider = document.getElementById('animation-speed');
+    const animationSpeedValue = document.getElementById('animation-speed-value');
+
+    if (animationSpeedSlider && animationSpeedValue) {
+        animationSpeedSlider.addEventListener('input', (e) => {
+            const value = parseInt(e.target.value);
+            audioSync.maxAnimationSpeed = value;
+            animationSpeedValue.textContent = value + 'x';
+            console.log(`Animation speed updated to ${value}x max speed`);
+        });
+    }
+
+    console.log('✅ All UI controls set up');
+
+    // Pre-initialize microphone on page load to prevent startup spike
+    // This "warms up" the microphone before user starts session
+    console.log('🎤 Pre-initializing microphone to prevent startup spike...');
+    try {
+        await audioSync.initializeMicrophone();
+        console.log('✅ Microphone pre-initialized successfully');
+    } catch (error) {
+        console.warn('⚠️ Could not pre-initialize microphone (will request on Start):', error.message);
     }
 
     // Azure API Key management
