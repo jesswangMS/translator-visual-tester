@@ -1154,8 +1154,10 @@ class TranslatorApp {
                 };
                 speechConfig.speechSynthesisVoiceName = voiceMap[lang] || voiceMap['en-US'];
 
-                // Create synthesizer
-                const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig);
+                // Create synthesizer with NO audio output (we'll play it manually through Web Audio API)
+                // This prevents the double audio issue where Azure plays AND Web Audio API plays
+                const audioConfig = null; // No automatic audio playback
+                const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig, audioConfig);
 
                 // Synthesize speech
                 synthesizer.speakTextAsync(
