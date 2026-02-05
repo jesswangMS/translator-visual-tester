@@ -930,8 +930,12 @@ class TranslatorApp {
 
         // IMPORTANT: Stop speech recognition during THINKING/TALKING to prevent echo
         try {
-            this.recognition.stop();
-            console.log('🔴 Stopped speech recognition for THINKING/TALKING state');
+            if (this.recognition) {
+                this.recognition.stopContinuousRecognitionAsync(
+                    () => console.log('🔴 Stopped speech recognition for THINKING/TALKING state'),
+                    (error) => console.log('Recognition stop error:', error)
+                );
+            }
         } catch (error) {
             console.log('Recognition already stopped or error:', error);
         }
@@ -1081,6 +1085,18 @@ class TranslatorApp {
         console.log(`   Text: "${text.substring(0, 50)}..."`);
         console.log(`   Language: ${lang || this.targetLang}`);
 
+        // Stop any currently playing audio source
+        if (this.currentAudioSource) {
+            try {
+                this.currentAudioSource.stop();
+                this.currentAudioSource.disconnect();
+                console.log('🛑 Stopped previous audio in speak()');
+            } catch (e) {
+                console.log('Previous audio already stopped');
+            }
+            this.currentAudioSource = null;
+        }
+
         // Cancel any ongoing browser speech synthesis
         if (this.synthesis) {
             this.synthesis.cancel();
@@ -1094,6 +1110,18 @@ class TranslatorApp {
     async speakWithAzureBackend(text, lang) {
         return new Promise((resolve, reject) => {
             try {
+                // STOP any currently playing audio source first
+                if (this.currentAudioSource) {
+                    try {
+                        this.currentAudioSource.stop();
+                        this.currentAudioSource.disconnect();
+                        console.log('🛑 Stopped previous audio source');
+                    } catch (e) {
+                        console.log('Previous audio already stopped:', e);
+                    }
+                    this.currentAudioSource = null;
+                }
+
                 // TRIPLE-CHECK: Cancel browser speech synthesis in multiple ways
                 if (window.speechSynthesis) {
                     // Method 1: Cancel any queued utterances
