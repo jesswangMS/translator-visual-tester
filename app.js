@@ -635,6 +635,12 @@ class TranslatorApp {
                 // IDLE → LISTENING: Instant transition when volume detected
                 if (this.currentState === States.IDLE && volume > threshold) {
                     console.log(`🔊 Volume detected (${volume.toFixed(1)}) - transitioning to LISTENING`);
+                    // Clear any leftover silence timer from previous cycle
+                    if (silenceTimer) {
+                        clearTimeout(silenceTimer);
+                        silenceTimer = null;
+                        console.log('🧹 Cleared leftover silence timer');
+                    }
                     this.setState(States.LISTENING);
                     audioSync.startListeningAnimation(this.avatarElement);
                     lastVolumeTime = Date.now();
@@ -652,6 +658,12 @@ class TranslatorApp {
                     } else {
                         // Check if we've been silent long enough
                         const silenceDuration = Date.now() - lastVolumeTime;
+
+                        // Debug: Warn if stuck in LISTENING for too long
+                        if (silenceDuration > 5000 && silenceDuration % 1000 < 20) {
+                            console.warn(`⚠️ Still in LISTENING after ${(silenceDuration/1000).toFixed(1)}s - volume: ${volume.toFixed(1)}, threshold: ${threshold}, silenceTimer: ${silenceTimer ? 'EXISTS' : 'NULL'}`);
+                        }
+
                         if (silenceDuration >= silenceThreshold && !silenceTimer) {
                             console.log(`🔇 Silence detected (${silenceDuration}ms) - starting cooldown`);
                             // Transition to WAITING immediately
@@ -663,11 +675,6 @@ class TranslatorApp {
                             if (this.showTimer) {
                                 audioSync.playTimerAnimation(this.avatarElement, this.cooldownDuration, () => {
                                     console.log('✅ Timer complete - entering THINKING');
-                                    // Clear the backup timeout since timer completed
-                                    if (silenceTimer) {
-                                        clearTimeout(silenceTimer);
-                                        silenceTimer = null;
-                                    }
                                     this.setState(States.THINKING);
                                     audioSync.stopVolumeMonitoring();
                                     audioSync.startThinkingAnimation(this.avatarElement);
@@ -685,30 +692,30 @@ class TranslatorApp {
                                         }
                                     }, 100);
                                 });
+                            } else {
+                                // Backup timeout if timer disabled - store reference so it can be cancelled
+                                silenceTimer = setTimeout(() => {
+                                    if (this.currentState === States.WAITING) {
+                                        console.log('✅ Cooldown complete (backup timeout) - entering THINKING');
+                                        this.setState(States.THINKING);
+                                        audioSync.stopVolumeMonitoring();
+                                        audioSync.startThinkingAnimation(this.avatarElement);
+
+                                        setTimeout(() => {
+                                            const transcript = this.lastTranscript || '';
+                                            if (transcript && this.validateSpeech(transcript)) {
+                                                this.handleTranslation(transcript);
+                                            } else {
+                                                console.error('❌ No valid transcript - returning to IDLE');
+                                                this.setState(States.IDLE);
+                                                this.showIdleImage();
+                                                audioSync.stopThinkingAnimation();
+                                            }
+                                        }, 100);
+                                    }
+                                    silenceTimer = null;
+                                }, this.cooldownDuration);
                             }
-
-                            // Backup timeout if timer disabled - store reference so it can be cancelled
-                            silenceTimer = setTimeout(() => {
-                                if (this.currentState === States.WAITING) {
-                                    console.log('✅ Cooldown complete (backup timeout) - entering THINKING');
-                                    this.setState(States.THINKING);
-                                    audioSync.stopVolumeMonitoring();
-                                    audioSync.startThinkingAnimation(this.avatarElement);
-
-                                    setTimeout(() => {
-                                        const transcript = this.lastTranscript || '';
-                                        if (transcript && this.validateSpeech(transcript)) {
-                                            this.handleTranslation(transcript);
-                                        } else {
-                                            console.error('❌ No valid transcript - returning to IDLE');
-                                            this.setState(States.IDLE);
-                                            this.showIdleImage();
-                                            audioSync.stopThinkingAnimation();
-                                        }
-                                    }, 100);
-                                }
-                                silenceTimer = null;
-                            }, this.cooldownDuration);
                         }
                     }
                 }
@@ -720,6 +727,12 @@ class TranslatorApp {
                         // Cancel timers and return to LISTENING
                         audioSync.stopTimerAnimation();
                         audioSync.stopVolumeMonitoring();
+                        // Clear silence timer if it exists
+                        if (silenceTimer) {
+                            clearTimeout(silenceTimer);
+                            silenceTimer = null;
+                            console.log('🧹 Cleared silence timer due to interruption');
+                        }
                         this.setState(States.LISTENING);
                         audioSync.startListeningAnimation(this.avatarElement);
                         lastVolumeTime = Date.now();

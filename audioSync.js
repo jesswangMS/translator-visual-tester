@@ -252,7 +252,11 @@ class AudioSync {
     }
 
     startListeningAnimation(avatarElement) {
-        if (this.isListening) return;
+        // Force stop if already listening to ensure clean restart
+        if (this.isListening) {
+            console.log('⚠️ Listening animation already running - forcing restart');
+            this.stopListeningAnimation();
+        }
         this.isListening = true;
         this.smoothedVolume = 0; // Reset smoothed volume
         let frameCount = 0;
