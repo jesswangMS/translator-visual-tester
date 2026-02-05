@@ -174,18 +174,22 @@ class TranslatorApp {
                 this.speechRegion = savedRegion;
                 console.log(`✅ Using saved credentials for region: ${this.speechRegion}`);
             } else {
-                // Fallback: Try to get from backend (if running locally)
+                // Fallback: Try to get from backend (only works when running locally)
                 try {
-                    console.log('🔑 Attempting to get Azure Speech token from backend...');
-                    const tokenResponse = await fetch('http://localhost:3000/api/speech-token');
+                    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                        console.log('🔑 Attempting to get Azure Speech token from local backend...');
+                        const tokenResponse = await fetch('http://localhost:3000/api/speech-token');
 
-                    if (tokenResponse.ok) {
-                        const tokenData = await tokenResponse.json();
-                        if (tokenData.token && tokenData.region) {
-                            this.speechToken = tokenData.token;
-                            this.speechRegion = tokenData.region;
-                            console.log(`✅ Got Azure Speech token from backend for region: ${this.speechRegion}`);
+                        if (tokenResponse.ok) {
+                            const tokenData = await tokenResponse.json();
+                            if (tokenData.token && tokenData.region) {
+                                this.speechToken = tokenData.token;
+                                this.speechRegion = tokenData.region;
+                                console.log(`✅ Got Azure Speech token from backend for region: ${this.speechRegion}`);
+                            }
                         }
+                    } else {
+                        console.log('ℹ️ Not on localhost - client-side API key required');
                     }
                 } catch (backendError) {
                     console.log('ℹ️ Backend not available (this is OK if using client-side key)');
@@ -1019,9 +1023,12 @@ class TranslatorApp {
 
             console.log(`📡 Translating: ${sourceCode} → ${targetCode}`);
 
-            // Try backend first (if available)
+            // Try backend first (if available - only works locally)
             try {
-                const backendResponse = await fetch('http://localhost:3000/api/translate', {
+                const backendUrl = window.location.hostname === 'localhost'
+                    ? 'http://localhost:3000/api/translate'
+                    : '/api/translate';
+                const backendResponse = await fetch(backendUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
