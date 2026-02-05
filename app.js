@@ -32,6 +32,13 @@ class TranslatorApp {
         this.audioContext = null; // Web Audio API context for audio analysis
         this.currentAudioSource = null; // Currently playing audio source
 
+        // AGGRESSIVELY DISABLE browser speech synthesis
+        // Cancel any existing synthesis immediately
+        if (window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+            console.log('🚫 Browser speech synthesis disabled - using Azure TTS only');
+        }
+
         this.initializeElements();
         this.initializeSpeechRecognition();
         this.attachEventListeners();
@@ -1087,8 +1094,22 @@ class TranslatorApp {
     async speakWithAzureBackend(text, lang) {
         return new Promise((resolve, reject) => {
             try {
+                // TRIPLE-CHECK: Cancel browser speech synthesis in multiple ways
+                if (window.speechSynthesis) {
+                    // Method 1: Cancel any queued utterances
+                    window.speechSynthesis.cancel();
+
+                    // Method 2: Also pause if speaking
+                    if (window.speechSynthesis.speaking) {
+                        window.speechSynthesis.pause();
+                        window.speechSynthesis.cancel();
+                    }
+
+                    console.log('🚫 BLOCKED: Browser speech synthesis forcefully cancelled');
+                }
+
                 const SpeechSDK = window.SpeechSDK;
-                console.log(`🗣️ Using Azure Speech SDK for TTS (${lang})`);
+                console.log(`🗣️ Using Azure Speech SDK ONLY for TTS (${lang})`);
 
                 // Create speech config
                 const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(
@@ -1114,6 +1135,11 @@ class TranslatorApp {
                     async (result) => {
                         if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) {
                             console.log('✅ TTS synthesis completed');
+
+                            // FINAL CHECK: Cancel browser synthesis right before playing Azure audio
+                            if (window.speechSynthesis) {
+                                window.speechSynthesis.cancel();
+                            }
 
                             try {
                                 // Convert audio data to blob
@@ -1214,37 +1240,8 @@ class TranslatorApp {
         });
     }
 
-    async speakWithBrowser(text, lang) {
-        return new Promise((resolve) => {
-            // Cancel any ongoing speech
-            this.synthesis.cancel();
-
-            // Wait a bit for cancel to complete
-            setTimeout(() => {
-                // Create utterance
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = lang;
-                utterance.rate = 0.9;
-                utterance.pitch = 1.0;
-
-                // Log available voices for debugging
-                const voices = this.synthesis.getVoices();
-                console.log(`   Available voices: ${voices.length}`);
-                const matchingVoice = voices.find(v => v.lang.startsWith(lang.substring(0, 2)));
-                if (matchingVoice) {
-                    console.log(`   Using voice: ${matchingVoice.name} (${matchingVoice.lang})`);
-                } else {
-                    console.warn(`   ⚠️ No matching voice found for ${lang}`);
-                }
-
-                this.setupUtteranceHandlers(utterance, resolve);
-
-                // Speak
-                console.log('   📢 Calling synthesis.speak()');
-                this.synthesis.speak(utterance);
-            }, 50);
-        });
-    }
+    // REMOVED: speakWithBrowser() function
+    // Browser speech synthesis is no longer used - Azure TTS only
 
     handleSpeechEnd(resolve) {
         // If session is still active, check if there's accumulated text
@@ -1305,117 +1302,8 @@ class TranslatorApp {
         resolve();
     }
 
-    setupUtteranceHandlers(utterance, resolve) {
-        // Track speaking rate using boundary events
-        let wordCount = 0;
-        let startTime = null;
-        let lastBoundaryTime = null;
-        let currentSpeakingRate = 1.0; // Default rate multiplier
-
-        utterance.onstart = () => {
-            console.log('🎙️ TTS Speech started - entering TALKING state');
-            console.log('   Avatar element:', this.avatarElement);
-            startTime = Date.now();
-            wordCount = 0;
-            this.setState(States.TALKING);
-
-            // Pass a function that returns current speaking rate
-            audioSync.startTalkingAnimation(this.avatarElement, () => currentSpeakingRate);
-            console.log('   Talking animation started with dynamic rate');
-        };
-
-        utterance.onboundary = (event) => {
-            // Boundary event fires for each word
-            if (event.name === 'word') {
-                wordCount++;
-                const currentTime = Date.now();
-                const elapsedSeconds = (currentTime - startTime) / 1000;
-
-                // Calculate words per second
-                const wordsPerSecond = wordCount / elapsedSeconds;
-
-                // Normal speaking rate is ~2-3 words/second
-                // Map to animation speed multiplier (0.5x to 2x)
-                // Slow speech (1 wps) -> 0.5x animation speed (30 fps)
-                // Normal speech (2.5 wps) -> 1.0x animation speed (60 fps)
-                // Fast speech (4+ wps) -> 2.0x animation speed (120 fps)
-                if (wordsPerSecond < 2) {
-                    currentSpeakingRate = 0.5 + (wordsPerSecond / 2) * 0.5; // 0.5x to 1.0x
-                } else if (wordsPerSecond < 3) {
-                    currentSpeakingRate = 1.0; // 1.0x (normal)
-                } else {
-                    currentSpeakingRate = 1.0 + Math.min(1.0, (wordsPerSecond - 3) / 2); // 1.0x to 2.0x
-                }
-
-                // Log every 5 words
-                if (wordCount % 5 === 0) {
-                    console.log(`📊 Speaking rate: ${wordsPerSecond.toFixed(2)} words/sec, Animation multiplier: ${currentSpeakingRate.toFixed(2)}x`);
-                }
-            }
-        };
-
-        utterance.onend = () => {
-            console.log('Browser TTS Speech ended');
-            audioSync.stopTalkingAnimation(this.avatarElement);
-            this.handleSpeechEnd(resolve);
-        };
-
-        utterance.onerror = (event) => {
-            console.error('🚨 Speech synthesis error:', event);
-            console.error('   Error type:', event.error);
-            console.error('   Error message:', event.message);
-
-            // Stop any ongoing animations
-            audioSync.stopTalkingAnimation(this.avatarElement);
-            audioSync.stopThinkingAnimation();
-
-            // If session is still active, check accumulated text and go back to listening
-            if (this.isActive) {
-                // Check if user spoke during TALKING state (even though error occurred)
-                if (this.accumulatedTranscript && this.accumulatedTranscript.trim() !== '') {
-                    console.log(`📦 User spoke during TALKING (error occurred): "${this.accumulatedTranscript}"`);
-                    console.log('   - Saving to lastTranscript and returning to LISTENING');
-                    console.log('   - Timer will start when user stops speaking (final result detected)');
-
-                    // Save accumulated transcript
-                    this.lastTranscript = this.accumulatedTranscript;
-
-                    // Update display
-                    this.transcriptionElement.textContent = this.lastTranscript;
-
-                    // Clear accumulation
-                    this.accumulatedTranscript = '';
-
-                    // Go to IDLE state and stay there
-                    this.showIdleImage();
-                    this.setState(States.IDLE);
-
-                    // Restart speech recognition but stay in IDLE
-                    // Azure continuous recognition stays running automatically
-
-                    // Note: Speech recognition continues, will detect when user speaks again
-                } else {
-                    // No accumulated text, return to IDLE
-                    console.log('   Returning to IDLE state after speech error');
-
-                    // Clear lastTranscript so next listening session starts fresh
-                    this.lastTranscript = '';
-                    console.log('   - Cleared lastTranscript for fresh start');
-
-                    this.showIdleImage();
-                    this.setState(States.IDLE);
-
-                    // Azure continuous recognition stays running automatically
-
-                    // Note: Speech recognition continues, will detect when user speaks again
-                }
-            } else {
-                this.showIdleImage();
-                this.setState(States.IDLE);
-            }
-            resolve();
-        };
-    }
+    // REMOVED: setupUtteranceHandlers() function
+    // Only used by removed speakWithBrowser() - no longer needed
 
     toggleLanguage() {
         if (this.autoDetect) {
