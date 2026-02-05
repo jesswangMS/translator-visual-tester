@@ -22,7 +22,7 @@ class AudioSync {
         this.smoothedVolume = 0; // Smoothed volume for listening animation
         this.volumeSmoothingFactor = 0.85; // Higher = faster response to volume changes (0-1, higher is faster)
         this.microphoneStartTime = 0; // Track when microphone starts to ignore initial spike
-        this.maxAnimationSpeed = 5; // Maximum animation speed multiplier (2-10x)
+        this.maxAnimationSpeed = 8; // Maximum animation speed multiplier (2-10x)
         this.allFramesPreloaded = false; // Track if all animation frames are preloaded
         this.spriteSheets = {
             listening: null,
@@ -484,7 +484,8 @@ class AudioSync {
         }
 
         const useDynamicSpeed = getRateMultiplier !== null;
-        console.log(`🗣️ Starting talking animation (${useDynamicSpeed ? 'DYNAMIC 1x-8x speed (AE-style)' : 'constant 15fps'})`);
+        const speedRange = useDynamicSpeed ? `1x-${this.maxAnimationSpeed}x` : '15fps';
+        console.log(`🗣️ Starting talking animation (${useDynamicSpeed ? `DYNAMIC ${speedRange} speed (AE-style)` : 'constant 15fps'})`);
         console.log('   Using canvas rendering for instant frame updates');
 
         this.isTalking = true;
@@ -558,7 +559,7 @@ class AudioSync {
 
         console.log('   Using sprite sheet: images/sprites/talking_sprite.png');
         if (useDynamicSpeed) {
-            console.log('   Speed adjusts 1x-8x based on audio volume (AE-style with threshold)');
+            console.log(`   Speed adjusts 1x-${this.maxAnimationSpeed}x based on audio volume (AE-style with threshold)`);
         } else {
             console.log('   Playing at constant 15 fps (67ms per frame)');
         }
