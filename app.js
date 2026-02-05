@@ -1126,11 +1126,12 @@ class TranslatorApp {
                 if (this.isActive) {
                     this.showIdleImage();
                     this.setState(States.IDLE);
-                    try {
-                        this.recognition.start();
-                    } catch (err) {
-                        console.log('Recognition already started or error:', err);
-                    }
+                    console.log('🔄 Restarting speech recognition after invalid translation...');
+                    this.recognition.startContinuousRecognitionAsync(
+                        () => console.log('✅ Recognition restarted successfully'),
+                        (error) => console.error('❌ Failed to restart recognition:', error)
+                    );
+                    audioSync.startListeningAnimation(this.avatarElement);
                 }
                 return;
             }
@@ -1451,11 +1452,12 @@ class TranslatorApp {
                 this.setState(States.IDLE);
 
                 // Restart speech recognition but stay in IDLE
-                try {
-                    this.recognition.start();
-                } catch (error) {
-                    console.log('Recognition already started or error:', error);
-                }
+                console.log('🔄 Restarting speech recognition...');
+                this.recognition.startContinuousRecognitionAsync(
+                    () => console.log('✅ Recognition restarted successfully'),
+                    (error) => console.error('❌ Failed to restart recognition:', error)
+                );
+                audioSync.startListeningAnimation(this.avatarElement);
             } else {
                 // No speech during TALKING - clear everything and go to IDLE
                 console.log('No speech detected during TALKING - clearing transcripts and returning to IDLE');
@@ -1474,11 +1476,12 @@ class TranslatorApp {
                 this.setState(States.IDLE);
 
                 // Restart recognition
-                try {
-                    this.recognition.start();
-                } catch (error) {
-                    console.log('Recognition already started or error:', error);
-                }
+                console.log('🔄 Restarting speech recognition...');
+                this.recognition.startContinuousRecognitionAsync(
+                    () => console.log('✅ Recognition restarted successfully'),
+                    (error) => console.error('❌ Failed to restart recognition:', error)
+                );
+                audioSync.startListeningAnimation(this.avatarElement);
             }
         } else {
             console.log('Session not active - staying in current state');
