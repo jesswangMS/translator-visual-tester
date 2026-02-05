@@ -164,20 +164,41 @@ class TranslatorApp {
         }
 
         try {
-            // Get Azure Speech token from backend
-            console.log('🔑 Getting Azure Speech token...');
-            const tokenResponse = await fetch('http://localhost:3000/api/speech-token');
-            const tokenData = await tokenResponse.json();
+            // Try to get API key from localStorage first
+            const savedKey = localStorage.getItem('azureSpeechKey');
+            const savedRegion = localStorage.getItem('azureSpeechRegion');
 
-            if (!tokenData.token || !tokenData.region) {
-                throw new Error('Failed to get Azure Speech token');
+            if (savedKey && savedRegion) {
+                console.log('🔑 Using saved Azure Speech key from localStorage');
+                this.speechToken = savedKey;
+                this.speechRegion = savedRegion;
+                console.log(`✅ Using saved credentials for region: ${this.speechRegion}`);
+            } else {
+                // Fallback: Try to get from backend (if running locally)
+                try {
+                    console.log('🔑 Attempting to get Azure Speech token from backend...');
+                    const tokenResponse = await fetch('http://localhost:3000/api/speech-token');
+
+                    if (tokenResponse.ok) {
+                        const tokenData = await tokenResponse.json();
+                        if (tokenData.token && tokenData.region) {
+                            this.speechToken = tokenData.token;
+                            this.speechRegion = tokenData.region;
+                            console.log(`✅ Got Azure Speech token from backend for region: ${this.speechRegion}`);
+                        }
+                    }
+                } catch (backendError) {
+                    console.log('ℹ️ Backend not available (this is OK if using client-side key)');
+                }
+
+                // If still no key, prompt user
+                if (!this.speechToken || !this.speechRegion) {
+                    alert('⚠️ Please enter your Azure Speech API key in the Settings panel before starting a session.');
+                    // Open settings panel
+                    document.getElementById('settings-panel').style.display = 'block';
+                    return;
+                }
             }
-
-            console.log(`✅ Got Azure Speech token for region: ${tokenData.region}`);
-
-            // Store token and region for recognizer creation
-            this.speechToken = tokenData.token;
-            this.speechRegion = tokenData.region;
 
             // Set initial language (zh-CN for AUTO mode)
             this.currentRecognitionLang = 'zh-CN';
@@ -187,7 +208,7 @@ class TranslatorApp {
 
         } catch (error) {
             console.error('❌ Failed to initialize Azure Speech:', error);
-            alert('Failed to initialize Azure Speech Recognition. Please check your API key and try again.');
+            alert('Failed to initialize Azure Speech Recognition. Please check your API key in Settings and try again.');
         }
     }
 
@@ -985,29 +1006,57 @@ class TranslatorApp {
 
     async translateWithAzure(text, sourceLang, targetLang) {
         try {
-            // Use Azure Translator API via backend
-            console.log(`📡 Calling Azure Translator API: ${sourceLang} → ${targetLang}`);
+            // Map language codes to MyMemory format
+            const langMap = {
+                'en-US': 'en-US',
+                'zh-CN': 'zh-CN',
+                'en': 'en-US',
+                'zh-Hans': 'zh-CN'
+            };
 
-            const response = await fetch('http://localhost:3000/api/translate', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    text: text,
-                    from: sourceLang === 'en-US' ? 'en' : 'zh-Hans',
-                    to: targetLang === 'zh-CN' ? 'zh-Hans' : 'en'
-                })
-            });
+            const sourceCode = langMap[sourceLang] || sourceLang;
+            const targetCode = langMap[targetLang] || targetLang;
+
+            console.log(`📡 Translating: ${sourceCode} → ${targetCode}`);
+
+            // Try backend first (if available)
+            try {
+                const backendResponse = await fetch('http://localhost:3000/api/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        from: sourceLang === 'en-US' ? 'en' : 'zh-Hans',
+                        to: targetLang === 'zh-CN' ? 'zh-Hans' : 'en'
+                    })
+                });
+
+                if (backendResponse.ok) {
+                    const data = await backendResponse.json();
+                    return data.translation;
+                }
+            } catch (backendError) {
+                console.log('ℹ️ Backend not available, using direct API call');
+            }
+
+            // Fallback: Call MyMemory API directly (free, no key required)
+            const endpoint = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceCode}|${targetCode}`;
+            const response = await fetch(endpoint);
 
             if (!response.ok) {
                 throw new Error(`Translation API error: ${response.status}`);
             }
 
             const data = await response.json();
-            return data.translation;
+            if (data.responseStatus === 200) {
+                const translation = data.responseData.translatedText;
+                console.log(`✅ Translation: "${text}" → "${translation}"`);
+                return translation;
+            } else {
+                throw new Error('Translation API returned error');
+            }
         } catch (error) {
-            console.error('❌ Azure translation failed:', error);
+            console.error('❌ Translation failed:', error);
             // Fallback: return original text
             return text;
         }
@@ -1024,40 +1073,56 @@ class TranslatorApp {
     }
 
     async speakWithAzureBackend(text, lang) {
-        try {
-            console.log(`📡 Calling Azure Speech TTS via backend`);
+        return new Promise((resolve, reject) => {
+            try {
+                const SpeechSDK = window.SpeechSDK;
 
-            const response = await fetch('http://localhost:3000/api/synthesize', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    text: text,
-                    lang: lang
-                })
-            });
+                console.log(`🗣️ Using Azure Speech SDK for TTS (${lang})`);
 
-            if (!response.ok) {
-                throw new Error(`TTS API error: ${response.status}`);
-            }
+                // Create speech config using saved credentials
+                const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(
+                    this.speechToken,
+                    this.speechRegion
+                );
 
-            // Get audio blob
-            const audioBlob = await response.blob();
+                // Map language to voice
+                const voiceMap = {
+                    'en': 'en-US-JennyNeural',
+                    'en-US': 'en-US-JennyNeural',
+                    'zh-Hans': 'zh-CN-XiaoxiaoNeural',
+                    'zh-CN': 'zh-CN-XiaoxiaoNeural'
+                };
+                speechConfig.speechSynthesisVoiceName = voiceMap[lang] || voiceMap['en-US'];
 
-            // Initialize audio context if needed
-            if (!this.audioContext) {
-                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            }
+                // Create synthesizer
+                const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig);
 
-            // Resume context if suspended
-            if (this.audioContext.state === 'suspended') {
-                await this.audioContext.resume();
-            }
+                // Synthesize speech
+                synthesizer.speakTextAsync(
+                    text,
+                    (result) => {
+                        if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) {
+                            console.log('✅ TTS synthesis completed');
 
-            // Convert blob to array buffer
-            const arrayBuffer = await audioBlob.arrayBuffer();
-            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                            // Convert audio data to blob
+                            const audioBlob = new Blob([result.audioData], { type: 'audio/mpeg' });
+
+                            // Process audio asynchronously
+                            (async () => {
+                                try {
+                                    // Initialize audio context if needed
+                                    if (!this.audioContext) {
+                                        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                                    }
+
+                                    // Resume context if suspended
+                                    if (this.audioContext.state === 'suspended') {
+                                        await this.audioContext.resume();
+                                    }
+
+                                    // Convert blob to array buffer
+                                    const arrayBuffer = await audioBlob.arrayBuffer();
+                                    const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
             // Create source and analyzer for volume analysis
             const source = this.audioContext.createBufferSource();
@@ -1104,36 +1169,53 @@ class TranslatorApp {
                 audioSync.startTalkingAnimation(this.avatarElement, getVolumeMultiplier);
                 console.log('   Talking animation started with Azure audio analysis');
 
-                source.onended = () => {
-                    console.log('Azure TTS playback ended');
-                    this.currentAudioSource = null;
-                    audioSync.stopTalkingAnimation(this.avatarElement);
-                    this.showIdleImage();
+                                    source.onended = () => {
+                                        console.log('Azure TTS playback ended');
+                                        this.currentAudioSource = null;
+                                        audioSync.stopTalkingAnimation(this.avatarElement);
+                                        this.showIdleImage();
 
-                    // Clear transcripts for next round
-                    this.lastTranscript = '';
-                    this.transcriptionElement.textContent = '';
-                    console.log('🧹 Cleared transcripts for next session');
+                                        // Clear transcripts for next round
+                                        this.lastTranscript = '';
+                                        this.transcriptionElement.textContent = '';
+                                        console.log('🧹 Cleared transcripts for next session');
 
-                    // If session is still active, return to IDLE and restart recognition
-                    if (this.isActive) {
-                        this.setState(States.IDLE);
-                        // Azure continuous recognition stays running automatically
-                    } else {
-                        this.setState(States.IDLE);
+                                        // If session is still active, return to IDLE
+                                        if (this.isActive) {
+                                            this.setState(States.IDLE);
+                                        } else {
+                                            this.setState(States.IDLE);
+                                        }
+
+                                        synthesizer.close();
+                                        resolve();
+                                    };
+
+                                    source.start(0);
+                                    console.log('   Audio source started with Azure SDK');
+                                } catch (audioError) {
+                                    console.error('❌ Audio processing failed:', audioError);
+                                    synthesizer.close();
+                                    reject(audioError);
+                                }
+                            })();
+                        } else {
+                            console.error('❌ TTS synthesis failed:', result.reason);
+                            synthesizer.close();
+                            reject(new Error('TTS synthesis failed'));
+                        }
+                    },
+                    (error) => {
+                        console.error('❌ Azure TTS error:', error);
+                        synthesizer.close();
+                        reject(error);
                     }
-
-                    resolve();
-                };
-
-                source.start(0);
-                console.log('   Audio source started');
-            });
-        } catch (error) {
-            console.error('❌ Azure TTS failed:', error);
-            // Fallback to browser speech synthesis
-            await this.speakWithBrowser(text, lang);
-        }
+                );
+            } catch (error) {
+                console.error('❌ Azure TTS setup failed:', error);
+                reject(error);
+            }
+        });
     }
 
     async speakWithAzure(text, lang, azureKey) {
@@ -1678,6 +1760,69 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.log(`Cooldown duration updated to ${value}ms (${(value / 1000).toFixed(1)}s)`);
         });
     }
+
+    // Azure API Key management
+    const azureKeyInput = document.getElementById('azure-key-input');
+    const azureRegionInput = document.getElementById('azure-region-input');
+    const saveKeyBtn = document.getElementById('save-key-btn');
+    const clearKeyBtn = document.getElementById('clear-key-btn');
+    const keyStatus = document.getElementById('key-status');
+
+    // Load saved key on startup
+    const savedKey = localStorage.getItem('azureSpeechKey');
+    const savedRegion = localStorage.getItem('azureSpeechRegion');
+    if (savedKey && savedRegion) {
+        azureKeyInput.value = savedKey;
+        azureRegionInput.value = savedRegion;
+        keyStatus.style.display = 'block';
+        keyStatus.style.background = '#d4edda';
+        keyStatus.style.color = '#155724';
+        keyStatus.textContent = '✅ API key loaded from browser storage';
+    }
+
+    // Save key button
+    saveKeyBtn.addEventListener('click', () => {
+        const key = azureKeyInput.value.trim();
+        const region = azureRegionInput.value;
+
+        if (!key) {
+            keyStatus.style.display = 'block';
+            keyStatus.style.background = '#f8d7da';
+            keyStatus.style.color = '#721c24';
+            keyStatus.textContent = '❌ Please enter an API key';
+            return;
+        }
+
+        // Save to localStorage
+        localStorage.setItem('azureSpeechKey', key);
+        localStorage.setItem('azureSpeechRegion', region);
+
+        // Update app instance
+        app.speechToken = key;
+        app.speechRegion = region;
+
+        keyStatus.style.display = 'block';
+        keyStatus.style.background = '#d4edda';
+        keyStatus.style.color = '#155724';
+        keyStatus.textContent = `✅ API key saved! Region: ${region}. Refresh the page to use it.`;
+
+        console.log(`🔑 Azure Speech key saved for region: ${region}`);
+    });
+
+    // Clear key button
+    clearKeyBtn.addEventListener('click', () => {
+        localStorage.removeItem('azureSpeechKey');
+        localStorage.removeItem('azureSpeechRegion');
+        azureKeyInput.value = '';
+        azureRegionInput.value = 'eastus';
+
+        keyStatus.style.display = 'block';
+        keyStatus.style.background = '#fff3cd';
+        keyStatus.style.color = '#856404';
+        keyStatus.textContent = '⚠️ API key cleared. Enter a new key to use the app.';
+
+        console.log('🔑 Azure Speech key cleared from localStorage');
+    });
 
     // Load and display idle image on startup
     const idleImg = new Image();

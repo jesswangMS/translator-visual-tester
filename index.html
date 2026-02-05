@@ -55,16 +55,50 @@
         <div id="settings-panel" class="settings-panel" style="display: none;">
             <h3 style="margin-top: 0; color: #1976d2;">⚙️ Settings</h3>
 
-            <!-- Info Section -->
+            <!-- Azure API Key Input -->
             <div class="api-key-section">
-                <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
                     <strong>🎙️ Powered by Azure Speech Services</strong><br>
                     <small>
-                        This app uses Azure Speech for recognition, translation, and text-to-speech.<br>
-                        Configure your API key in the <code>.env</code> file and run <code>npm start</code> to begin.<br>
-                        <a href="https://portal.azure.com/" target="_blank">Get free Azure Speech key</a> (5 hours/month free)
+                        Enter your Azure Speech API key to use the translator.<br>
+                        <a href="https://portal.azure.com/" target="_blank">Get free Azure Speech key</a> (5 hours/month free)<br>
+                        <strong>⚠️ Your key is stored locally in your browser only</strong>
                     </small>
                 </div>
+
+                <label for="azure-key-input">Azure Speech API Key:</label>
+                <input
+                    type="password"
+                    id="azure-key-input"
+                    placeholder="Enter your Azure Speech key..."
+                    style="width: 100%; padding: 10px; margin-top: 8px; margin-bottom: 8px; border: 2px solid #ddd; border-radius: 5px;"
+                >
+
+                <label for="azure-region-input">Azure Region:</label>
+                <select
+                    id="azure-region-input"
+                    style="width: 100%; padding: 10px; margin-top: 8px; margin-bottom: 15px; border: 2px solid #ddd; border-radius: 5px;"
+                >
+                    <option value="eastus">East US (eastus)</option>
+                    <option value="westus">West US (westus)</option>
+                    <option value="westus2">West US 2 (westus2)</option>
+                    <option value="eastus2">East US 2 (eastus2)</option>
+                    <option value="centralus">Central US (centralus)</option>
+                    <option value="westeurope">West Europe (westeurope)</option>
+                    <option value="northeurope">North Europe (northeurope)</option>
+                    <option value="southeastasia">Southeast Asia (southeastasia)</option>
+                    <option value="eastasia">East Asia (eastasia)</option>
+                </select>
+
+                <button id="save-key-btn" class="btn btn-secondary" style="width: 100%; background: #4CAF50; color: white;">
+                    Save API Key
+                </button>
+
+                <button id="clear-key-btn" class="btn btn-secondary" style="width: 100%; margin-top: 8px; background: #f44336; color: white;">
+                    Clear Saved Key
+                </button>
+
+                <div id="key-status" style="margin-top: 10px; padding: 8px; border-radius: 5px; display: none;"></div>
             </div>
 
             <!-- Language Detection -->
