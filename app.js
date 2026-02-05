@@ -274,7 +274,16 @@ class TranslatorApp {
                 // Transition from IDLE to LISTENING immediately when speech detected
                 if (this.currentState === States.IDLE && this.isActive) {
                     console.log('🎤 Speech detected in IDLE - transitioning to LISTENING');
+                    // Clear any leftover silence timer
+                    if (this.silenceTimer) {
+                        clearTimeout(this.silenceTimer);
+                        this.silenceTimer = null;
+                        console.log('🧹 Cleared leftover silence timer (speech recognition)');
+                    }
                     this.setState(States.LISTENING);
+                    // CRITICAL: Start animation and reset timing for volume monitoring
+                    audioSync.startListeningAnimation(this.avatarElement);
+                    this.lastVolumeTime = Date.now();
                 }
 
                 // Handle interim results
@@ -623,8 +632,9 @@ class TranslatorApp {
             audioSync.startListeningAnimation(this.avatarElement);
 
             // Set up volume callback for instant state transitions based on volume
-            let silenceTimer = null;
-            let lastVolumeTime = Date.now();
+            // Use instance variables so speech recognition handlers can access them
+            this.silenceTimer = null;
+            this.lastVolumeTime = Date.now();
             const silenceThreshold = 500; // 500ms of silence triggers cooldown
 
             audioSync.setVolumeCallback((volume) => {
@@ -636,35 +646,35 @@ class TranslatorApp {
                 if (this.currentState === States.IDLE && volume > threshold) {
                     console.log(`🔊 Volume detected (${volume.toFixed(1)}) - transitioning to LISTENING`);
                     // Clear any leftover silence timer from previous cycle
-                    if (silenceTimer) {
-                        clearTimeout(silenceTimer);
-                        silenceTimer = null;
+                    if (this.silenceTimer) {
+                        clearTimeout(this.silenceTimer);
+                        this.silenceTimer = null;
                         console.log('🧹 Cleared leftover silence timer');
                     }
                     this.setState(States.LISTENING);
                     audioSync.startListeningAnimation(this.avatarElement);
-                    lastVolumeTime = Date.now();
+                    this.lastVolumeTime = Date.now();
                 }
 
                 // LISTENING: Monitor for silence to trigger cooldown
                 else if (this.currentState === States.LISTENING) {
                     if (volume > threshold) {
                         // Voice detected, reset silence timer
-                        lastVolumeTime = Date.now();
-                        if (silenceTimer) {
-                            clearTimeout(silenceTimer);
-                            silenceTimer = null;
+                        this.lastVolumeTime = Date.now();
+                        if (this.silenceTimer) {
+                            clearTimeout(this.silenceTimer);
+                            this.silenceTimer = null;
                         }
                     } else {
                         // Check if we've been silent long enough
-                        const silenceDuration = Date.now() - lastVolumeTime;
+                        const silenceDuration = Date.now() - this.lastVolumeTime;
 
                         // Debug: Warn if stuck in LISTENING for too long
                         if (silenceDuration > 5000 && silenceDuration % 1000 < 20) {
-                            console.warn(`⚠️ Still in LISTENING after ${(silenceDuration/1000).toFixed(1)}s - volume: ${volume.toFixed(1)}, threshold: ${threshold}, silenceTimer: ${silenceTimer ? 'EXISTS' : 'NULL'}`);
+                            console.warn(`⚠️ Still in LISTENING after ${(silenceDuration/1000).toFixed(1)}s - volume: ${volume.toFixed(1)}, threshold: ${threshold}, silenceTimer: ${this.silenceTimer ? 'EXISTS' : 'NULL'}`);
                         }
 
-                        if (silenceDuration >= silenceThreshold && !silenceTimer) {
+                        if (silenceDuration >= silenceThreshold && !this.silenceTimer) {
                             console.log(`🔇 Silence detected (${silenceDuration}ms) - starting cooldown`);
                             // Transition to WAITING immediately
                             this.setState(States.WAITING);
@@ -694,7 +704,7 @@ class TranslatorApp {
                                 });
                             } else {
                                 // Backup timeout if timer disabled - store reference so it can be cancelled
-                                silenceTimer = setTimeout(() => {
+                                this.silenceTimer = setTimeout(() => {
                                     if (this.currentState === States.WAITING) {
                                         console.log('✅ Cooldown complete (backup timeout) - entering THINKING');
                                         this.setState(States.THINKING);
@@ -713,7 +723,7 @@ class TranslatorApp {
                                             }
                                         }, 100);
                                     }
-                                    silenceTimer = null;
+                                    this.silenceTimer = null;
                                 }, this.cooldownDuration);
                             }
                         }
@@ -728,14 +738,14 @@ class TranslatorApp {
                         audioSync.stopTimerAnimation();
                         audioSync.stopVolumeMonitoring();
                         // Clear silence timer if it exists
-                        if (silenceTimer) {
-                            clearTimeout(silenceTimer);
-                            silenceTimer = null;
+                        if (this.silenceTimer) {
+                            clearTimeout(this.silenceTimer);
+                            this.silenceTimer = null;
                             console.log('🧹 Cleared silence timer due to interruption');
                         }
                         this.setState(States.LISTENING);
                         audioSync.startListeningAnimation(this.avatarElement);
-                        lastVolumeTime = Date.now();
+                        this.lastVolumeTime = Date.now();
                     }
                 }
             });
