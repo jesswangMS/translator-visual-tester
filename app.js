@@ -23,16 +23,93 @@ class TranslatorApp {
         this.lastTranscript = '';
         this.accumulatedTranscript = ''; // Accumulate speech during TALKING state
         this.cooldownDuration = 2500; // 2.5 seconds in milliseconds
-        this.showTimer = false; // Timer animation visibility toggle
+        this.showTimer = true; // Timer animation visibility toggle (default: show)
         this.lastResultIndex = 0; // Track which results we've already processed
         this.noAudioTimer = null; // Timer for detecting no audio in LISTENING state
         this.noAudioTimeout = 5000; // 5 seconds of no audio before returning to IDLE
+        this.interimResultTimer = null; // Timer to finalize interim results if no final result comes
+        this.interimResultTimeout = 2000; // 2 seconds after last interim result, treat as final
         this.audioContext = null; // Web Audio API context for audio analysis
         this.currentAudioSource = null; // Currently playing audio source
 
         this.initializeElements();
         this.initializeSpeechRecognition();
         this.attachEventListeners();
+        this.initializeUIState();
+    }
+
+    initializeUIState() {
+        // Set timer button text based on default showTimer state
+        if (this.showTimer) {
+            this.timerToggleText.textContent = 'Hide Timer';
+            this.timerToggleButton.classList.add('active');
+        } else {
+            this.timerToggleText.textContent = 'Show Timer';
+            this.timerToggleButton.classList.remove('active');
+        }
+    }
+
+    validateSpeech(text) {
+        // Filter out invalid or nonsensical speech
+        if (!text || text.trim() === '') {
+            return false;
+        }
+
+        const trimmed = text.trim();
+
+        // Reject if too short (less than 2 characters)
+        if (trimmed.length < 2) {
+            console.log(`⚠️ Rejected: Too short (${trimmed.length} chars): "${trimmed}"`);
+            return false;
+        }
+
+        // Reject if it's just punctuation or symbols
+        const alphanumericCount = (trimmed.match(/[\w\u4e00-\u9fa5]/g) || []).length;
+        if (alphanumericCount < 2) {
+            console.log(`⚠️ Rejected: Too few alphanumeric characters: "${trimmed}"`);
+            return false;
+        }
+
+        // Reject common speech recognition errors, filler words, and noise
+        const commonErrors = [
+            // English filler words
+            'uh', 'um', 'ah', 'eh', 'mm', 'hmm', 'hm', 'mhm', 'mmm',
+            'uh huh', 'mm hmm', 'uh uh', 'uhh', 'umm', 'ahh', 'hmm hmm',
+            'oh', 'ooh', 'oof', 'whoa', 'yeah', 'yep', 'nope', 'nah',
+            // Single letters/articles that shouldn't be translated alone
+            'a', 'i', 'the', 'and', 'or', 'but', 'in', 'on', 'at',
+            // Chinese filler words
+            '啊', '嗯', '呃', '哦', '哎', '唉', '诶', '额', '嘿',
+            '嗯嗯', '啊啊', '哦哦', '呃呃',
+            // Common meaningless sounds
+            'shh', 'ssh', 'tsk', 'pfft', 'ugh', 'gah', 'bah',
+            'ha', 'haha', 'heh', 'hehe'
+        ];
+
+        // Check both exact match and if the text starts/ends with filler words
+        const lowerTrimmed = trimmed.toLowerCase();
+        if (commonErrors.includes(lowerTrimmed)) {
+            console.log(`⚠️ Rejected: Filler word/noise: "${trimmed}"`);
+            return false;
+        }
+
+        // Also reject if it's ONLY filler words (space-separated)
+        const words = lowerTrimmed.split(/\s+/);
+        const allFillers = words.every(word => commonErrors.includes(word));
+        if (allFillers) {
+            console.log(`⚠️ Rejected: Only filler words: "${trimmed}"`);
+            return false;
+        }
+
+        // Reject if it's mostly repetitive characters (e.g., "aaaa", "1111")
+        const uniqueChars = new Set(trimmed.toLowerCase().replace(/\s/g, '')).size;
+        if (trimmed.length >= 4 && uniqueChars <= 2) {
+            console.log(`⚠️ Rejected: Repetitive characters: "${trimmed}"`);
+            return false;
+        }
+
+        console.log(`✅ Valid speech: "${trimmed}"`);
+        return true;
     }
 
     initializeElements() {
@@ -49,7 +126,10 @@ class TranslatorApp {
         this.settingsToggleButton = document.getElementById('settings-toggle');
         this.settingsToggleText = document.getElementById('settings-toggle-text');
         this.settingsPanel = document.getElementById('settings-panel');
-        this.apiKeyInput = document.getElementById('api-key');
+        this.debugToggleButton = document.getElementById('debug-toggle');
+        this.debugToggleText = document.getElementById('debug-toggle-text');
+        this.debugPanel = document.getElementById('debug-panel');
+        this.apiKeyInput = document.getElementById('api-key'); // May be null if using Azure backend
         this.azureRegionInput = document.getElementById('azure-region');
         this.transcriptionElement = document.getElementById('transcription');
         this.translationElement = document.getElementById('translation');
@@ -67,30 +147,83 @@ class TranslatorApp {
         }
     }
 
-    initializeSpeechRecognition() {
-        // Check for browser support
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    // Helper method for Azure Speech SDK - continuous recognition doesn't need manual restarts
+    restartRecognitionIfNeeded() {
+        // With Azure Speech SDK continuous recognition, this is handled automatically
+        // The sessionStopped event handler will restart if needed
+        console.log('   Note: Azure continuous recognition handles restarts automatically');
+    }
 
-        if (!SpeechRecognition) {
-            alert('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+    async initializeSpeechRecognition() {
+        // Use Azure Speech SDK for better accuracy
+        const SpeechSDK = window.SpeechSDK;
+
+        if (!SpeechSDK) {
+            alert('Azure Speech SDK is not loaded. Please refresh the page.');
             return;
         }
 
-        this.recognition = new SpeechRecognition();
-        this.recognition.continuous = false;
-        this.recognition.interimResults = true;
-        // In AUTO mode, use Chinese recognition (it can often pick up English too)
-        // This ensures Chinese speech is recognized as Chinese characters, not English phonetics
-        this.recognition.lang = 'zh-CN';
+        try {
+            // Get Azure Speech token from backend
+            console.log('🔑 Getting Azure Speech token...');
+            const tokenResponse = await fetch('http://localhost:3000/api/speech-token');
+            const tokenData = await tokenResponse.json();
 
-        this.recognition.onstart = () => {
-            console.log('🟢 Speech recognition started');
+            if (!tokenData.token || !tokenData.region) {
+                throw new Error('Failed to get Azure Speech token');
+            }
+
+            console.log(`✅ Got Azure Speech token for region: ${tokenData.region}`);
+
+            // Store token and region for recognizer creation
+            this.speechToken = tokenData.token;
+            this.speechRegion = tokenData.region;
+
+            // Set initial language (zh-CN for AUTO mode)
+            this.currentRecognitionLang = 'zh-CN';
+
+            // Create recognizer (will be recreated when language changes)
+            this.createAzureRecognizer();
+
+        } catch (error) {
+            console.error('❌ Failed to initialize Azure Speech:', error);
+            alert('Failed to initialize Azure Speech Recognition. Please check your API key and try again.');
+        }
+    }
+
+    createAzureRecognizer() {
+        const SpeechSDK = window.SpeechSDK;
+
+        // Create speech config using subscription key (not authorization token)
+        const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(
+            this.speechToken,
+            this.speechRegion
+        );
+
+        // Set recognition language
+        speechConfig.speechRecognitionLanguage = this.currentRecognitionLang;
+        console.log(`🌐 Azure recognizer language: ${this.currentRecognitionLang}`);
+
+        // Create audio config from default microphone
+        const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+
+        // Create recognizer
+        if (this.recognition) {
+            // Clean up old recognizer
+            this.recognition.close();
+        }
+
+        this.recognition = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+
+        // Store reference for cleanup
+        this.speechConfig = speechConfig;
+        this.audioConfig = audioConfig;
+
+        // Azure Speech SDK event: sessionStarted
+        this.recognition.sessionStarted = (s, e) => {
+            console.log('🟢 Azure Speech recognition session started');
             console.log(`   - Current state: ${this.currentState}`);
-            console.log(`   - Recognition language: ${this.recognition.lang}`);
-
-            // Reset result index for new recognition session
-            this.lastResultIndex = 0;
-            console.log('   - Reset lastResultIndex to 0');
+            console.log(`   - Recognition language: ${this.currentRecognitionLang}`);
 
             // Update recognition status display
             if (this.recognitionStatusElement) {
@@ -98,22 +231,97 @@ class TranslatorApp {
             }
         };
 
-        this.recognition.onresult = (event) => {
+        // Azure Speech SDK event: recognizing (interim results)
+        this.recognition.recognizing = (s, e) => {
             try {
-                // Only process NEW results (not already processed ones)
-                const newResults = Array.from(event.results).slice(this.lastResultIndex);
-                const transcript = newResults
-                    .map(result => result[0].transcript)
-                    .join('');
+                const transcript = e.result.text;
+                if (!transcript || transcript.trim() === '') return;
 
-                const isFinal = event.results[event.results.length - 1].isFinal;
+                console.log(`🎤 Speech interim: "${transcript}" | Current State: ${this.currentState}`);
 
-                console.log(`🎤 Speech ${isFinal ? 'FINAL' : 'interim'}: "${transcript}" | Current State: ${this.currentState}`);
+                // Transition from IDLE to LISTENING immediately when speech detected
+                if (this.currentState === States.IDLE && this.isActive) {
+                    console.log('🎤 Speech detected in IDLE - transitioning to LISTENING');
+                    this.setState(States.LISTENING);
+                }
 
-                // Update lastResultIndex when we get a final result
-                if (isFinal) {
-                    this.lastResultIndex = event.results.length;
-                    console.log(`   Updated lastResultIndex to ${this.lastResultIndex}`);
+                // Handle interim results
+                if (this.currentState === States.LISTENING && transcript.trim() !== '') {
+                    // Reset no-audio timer
+                    this.resetNoAudioTimer();
+                    // For interim results in LISTENING state, set a timer to auto-finalize
+                    // if no final result comes within 2 seconds
+                    if (this.interimResultTimer) {
+                        clearTimeout(this.interimResultTimer);
+                    }
+                    this.interimResultTimer = setTimeout(() => {
+                        console.log('⏰ No final result received - treating last interim as final');
+                        console.log(`   Last transcript: "${this.lastTranscript || transcript}"`);
+                        // Manually trigger finalization by calling the WAITING state logic
+                        if (this.currentState === States.LISTENING) {
+                            const finalTranscript = this.lastTranscript || transcript;
+                            if (finalTranscript.trim() !== '') {
+                                this.lastTranscript = finalTranscript;
+                                this.transcriptionElement.textContent = finalTranscript;
+
+                                // Validate the speech before processing
+                                if (!this.validateSpeech(finalTranscript)) {
+                                    console.log('❌ Speech validation failed - ignoring and staying in LISTENING state');
+                                    this.lastTranscript = '';
+                                    this.transcriptionElement.textContent = '';
+                                    this.startNoAudioTimer();
+                                    return;
+                                }
+
+                                console.log(`✅ Auto-finalized - entering WAITING state for ${this.cooldownDuration}ms`);
+                                this.setState(States.WAITING);
+                                audioSync.stopListeningAnimation();
+                                audioSync.startVolumeMonitoring();
+
+                                // Start timer and wait for translation
+                                const waitingVolumeThreshold = 50;
+                                audioSync.setVolumeCallback((volume) => {
+                                    if (this.currentState === States.WAITING && volume > waitingVolumeThreshold) {
+                                        console.log(`🔊 Volume detected during WAITING: ${volume.toFixed(1)} - interrupting timer!`);
+                                        this.interruptWaitingState();
+                                    }
+                                });
+
+                                if (this.showTimer) {
+                                    audioSync.playTimerAnimation(this.avatarElement, this.cooldownDuration, () => {
+                                        console.log('✅ Timer animation complete - validating before translation');
+                                        audioSync.clearVolumeCallback();
+                                        if (this.lastTranscript && this.validateSpeech(this.lastTranscript)) {
+                                            this.handleTranslation(this.lastTranscript);
+                                        } else {
+                                            console.error('❌ Validation failed - returning to IDLE');
+                                            this.lastTranscript = '';
+                                            this.transcriptionElement.textContent = '';
+                                            this.setState(States.IDLE);
+                                            this.showIdleImage();
+                                            // Azure continuous recognition stays running
+                                        }
+                                    });
+                                }
+
+                                this.translationTimer = setTimeout(() => {
+                                    if (!this.showTimer) {
+                                        audioSync.clearVolumeCallback();
+                                        if (this.lastTranscript && this.validateSpeech(this.lastTranscript)) {
+                                            this.handleTranslation(this.lastTranscript);
+                                        } else {
+                                            console.error('❌ Validation failed - returning to IDLE');
+                                            this.lastTranscript = '';
+                                            this.transcriptionElement.textContent = '';
+                                            this.setState(States.IDLE);
+                                            this.showIdleImage();
+                                            // Azure continuous recognition stays running
+                                        }
+                                    }
+                                }, this.cooldownDuration);
+                            }
+                        }
+                    }, this.interimResultTimeout);
                 }
 
                 // If in IDLE state with active session and speech detected → transition to LISTENING
@@ -124,75 +332,82 @@ class TranslatorApp {
                     audioSync.clearVolumeCallback();
                 }
 
-                // Reset no audio timer whenever speech is detected in LISTENING state
-                if (this.currentState === States.LISTENING && transcript.trim() !== '') {
-                    this.resetNoAudioTimer();
+                // For interim results, show in display (don't save to lastTranscript yet)
+                const displayText = this.lastTranscript ? this.lastTranscript + ' ' + transcript : transcript;
+                this.transcriptionElement.textContent = displayText;
+                console.log(`📝 Interim display: "${displayText}"`);
+
+            } catch (error) {
+                console.error('❌ Error in recognizing handler:', error);
+            }
+        };
+
+        // Azure Speech SDK event: recognized (final results)
+        this.recognition.recognized = (s, e) => {
+            try {
+                const transcript = e.result.text;
+                if (!transcript || transcript.trim() === '') return;
+
+                console.log(`🎤 Speech FINAL: "${transcript}" | Current State: ${this.currentState}`);
+
+                // Clear interim result timer since we got a final result
+                if (this.interimResultTimer) {
+                    clearTimeout(this.interimResultTimer);
+                    this.interimResultTimer = null;
                 }
 
-            // If in TALKING state, accumulate speech but DON'T interrupt
-            if (this.currentState === States.TALKING) {
-                if (isFinal && transcript.trim() !== '') {
-                    // Accumulate the transcript
+                // If in TALKING state, accumulate speech but DON'T interrupt
+                if (this.currentState === States.TALKING) {
                     if (this.accumulatedTranscript) {
                         this.accumulatedTranscript += ' ' + transcript;
                     } else {
                         this.accumulatedTranscript = transcript;
                     }
                     console.log(`📝 Accumulated during TALKING: "${this.accumulatedTranscript}"`);
-
-                    // Update display to show accumulated text
                     this.transcriptionElement.textContent = this.accumulatedTranscript;
-                }
-                // Don't interrupt TALKING state - just accumulate and return
-                return;
-            }
-
-            // If in WAITING state and speech recognition result detected → combine transcripts
-            if (this.currentState === States.WAITING) {
-                console.log('📝 Speech recognition result during WAITING state - updating transcript');
-                console.log(`   - Current transcript: "${transcript}"`);
-                console.log(`   - Previous transcript: "${this.lastTranscript}"`);
-
-                // Combine previous transcript with new speech
-                // The new speech might be a continuation or new sentence
-                if (this.lastTranscript && transcript.trim()) {
-                    this.lastTranscript = this.lastTranscript + ' ' + transcript;
-                    console.log(`   - Combined transcript: "${this.lastTranscript}"`);
-                } else if (transcript.trim()) {
-                    this.lastTranscript = transcript;
+                    return;
                 }
 
-                // Update display
-                this.transcriptionElement.textContent = this.lastTranscript;
+                // If in WAITING state, combine transcripts
+                if (this.currentState === States.WAITING) {
+                    console.log('📝 Final speech during WAITING - updating transcript');
+                    if (this.lastTranscript && transcript.trim()) {
+                        this.lastTranscript = this.lastTranscript + ' ' + transcript;
+                    } else if (transcript.trim()) {
+                        this.lastTranscript = transcript;
+                    }
+                    this.transcriptionElement.textContent = this.lastTranscript;
+                    return;
+                }
 
-                // Note: Timer was already interrupted by volume callback
-                // Return early to avoid processing this speech result again below
-                return;
-            }
-
-            // Update transcript display for LISTENING and other states
-            if (isFinal && transcript.trim() !== '') {
-                // Accumulate transcripts in LISTENING state
+                // Accumulate final transcripts
                 if (this.lastTranscript && this.lastTranscript.trim() !== '') {
                     this.lastTranscript = this.lastTranscript + ' ' + transcript;
                     console.log(`📝 Accumulated final transcript: "${this.lastTranscript}"`);
                 } else {
                     this.lastTranscript = transcript;
                 }
-                // Update display with accumulated transcript
                 this.transcriptionElement.textContent = this.lastTranscript;
-            } else if (transcript.trim() !== '') {
-                // For interim results, show accumulated + current interim (don't save to lastTranscript yet)
-                const displayText = this.lastTranscript ? this.lastTranscript + ' ' + transcript : transcript;
-                this.transcriptionElement.textContent = displayText;
-                console.log(`📝 Interim display: "${displayText}"`);
-            }
 
-            // If final result and in LISTENING state → go to WAITING state
-            if (isFinal && transcript.trim() !== '' && this.currentState === States.LISTENING) {
-                console.log(`⏱️ Final speech detected - entering WAITING state for ${this.cooldownDuration}ms`);
+                // If in LISTENING state → go to WAITING state
+                if (this.currentState === States.LISTENING) {
+                    console.log(`⏱️ Final speech detected - validating before translation`);
 
-                // Enter WAITING state immediately
+                    // Validate the speech before processing
+                    if (!this.validateSpeech(this.lastTranscript)) {
+                        console.log('❌ Speech validation failed - ignoring and staying in LISTENING state');
+                    console.log(`   Rejected text: "${this.lastTranscript}"`);
+                    // Clear the invalid transcript and stay in LISTENING state
+                    this.lastTranscript = '';
+                    this.transcriptionElement.textContent = '';
+                    // Restart no-audio timer to give user another chance
+                    this.startNoAudioTimer();
+                    return;
+                }
+
+                console.log(`✅ Speech validated - entering WAITING state for ${this.cooldownDuration}ms`);
+
+                // Enter WAITING state immediately (setState will auto-clear no-audio timer)
                 this.setState(States.WAITING);
 
                 // Stop listening animation but keep monitoring volume for interruptions
@@ -213,11 +428,24 @@ class TranslatorApp {
                 // Start custom timer animation (75 frames, 30fps, 2.5 seconds) - only if enabled
                 if (this.showTimer) {
                     console.log('⏱️ Timer animation is ENABLED - playing timer frames');
-                    audioSync.playTimerAnimation(this.avatarElement, () => {
-                        // Timer animation complete - start translation
-                        console.log('✅ Timer animation complete - starting translation');
+                    audioSync.playTimerAnimation(this.avatarElement, this.cooldownDuration, () => {
+                        // Timer animation complete - validate and start translation
+                        console.log('✅ Timer animation complete - validating before translation');
+                        console.log(`   Final transcript: "${this.lastTranscript}"`);
                         audioSync.clearVolumeCallback();
-                        this.handleTranslation(this.lastTranscript);
+
+                        // Validate before translation
+                        if (this.lastTranscript && this.validateSpeech(this.lastTranscript)) {
+                            this.handleTranslation(this.lastTranscript);
+                        } else {
+                            console.error('❌ ERROR: Speech validation failed or empty transcript - returning to IDLE');
+                            this.lastTranscript = '';
+                            this.transcriptionElement.textContent = '';
+                            this.setState(States.IDLE);
+                            this.showIdleImage();
+                            // Restart recognition
+                            // Azure continuous recognition stays running automatically
+                        }
                     });
                 } else {
                     console.log('⏱️ Timer animation is DISABLED - skipping timer frames');
@@ -228,133 +456,83 @@ class TranslatorApp {
                     // Only proceed if timer animation is disabled
                     // (If timer is enabled, the animation callback handles translation)
                     if (!this.showTimer) {
-                        console.log('✅ Waiting complete - starting translation (no timer animation)');
+                        console.log('✅ Waiting complete - validating before translation (no timer animation)');
+                        console.log(`   Final transcript: "${this.lastTranscript}"`);
                         audioSync.clearVolumeCallback();
-                        this.handleTranslation(this.lastTranscript);
+
+                        // Validate before translation
+                        if (this.lastTranscript && this.validateSpeech(this.lastTranscript)) {
+                            this.handleTranslation(this.lastTranscript);
+                        } else {
+                            console.error('❌ ERROR: Speech validation failed or empty transcript - returning to IDLE');
+                            this.lastTranscript = '';
+                            this.transcriptionElement.textContent = '';
+                            this.setState(States.IDLE);
+                            this.showIdleImage();
+                            // Restart recognition
+                            // Azure continuous recognition stays running automatically
+                        }
                     } else {
                         console.log('⏱️ setTimeout completed but timer animation is handling translation');
                     }
                 }, this.cooldownDuration);
 
-                console.log(`   - Waiting state entered. Timer ID: ${this.translationTimer}`);
-            }
+                    console.log(`   - Waiting state entered. Timer ID: ${this.translationTimer}`);
+                }
+
             } catch (error) {
-                console.error('❌ Error in onresult handler:', error);
-                console.error('   Stack trace:', error.stack);
-                // Try to continue - don't crash the entire recognition system
+                console.error('❌ Error in recognized handler:', error);
             }
         };
 
-        this.recognition.onerror = (event) => {
-            try {
-                // Check if it's a non-critical error first
-                if (event.error === 'no-speech' || event.error === 'aborted') {
-                    console.log(`ℹ️ Speech recognition: ${event.error} (normal, continuing...)`);
+        // Azure Speech SDK event: canceled (errors)
+        this.recognition.canceled = (s, e) => {
+            const SpeechSDK = window.SpeechSDK;
+            console.error('🚨 Azure Speech recognition canceled:', e.reason);
+
+            if (e.reason === SpeechSDK.CancellationReason.Error) {
+                console.error('   Error code:', e.errorCode);
+                console.error('   Error details:', e.errorDetails);
+
+                // Handle critical errors
+                if (e.errorCode === 'ConnectionFailure' || e.errorCode === 'AuthenticationFailure') {
+                    alert(`Speech recognition error: ${e.errorDetails}`);
+                    this.stopListening();
                     return;
                 }
-
-                // For other errors, log more details
-                console.error('🚨 Speech recognition error:', event.error);
-                console.error('   Full error event:', event);
-                console.error('   Error type:', typeof event.error);
-                console.error('   Current state:', this.currentState);
-
-                if (!event || !event.error) {
-                    console.error('   - Error event or event.error is missing!');
-                    return;
-                }
-
-                // Handle different error types
-                switch (event.error) {
-                    case 'no-speech':
-                    case 'aborted':
-                        // Already handled above
-                        break;
-
-                    case 'audio-capture':
-                        // Microphone problem - critical error
-                        console.error('   - Audio capture failed - stopping session');
-                        this.updateStatus('Error: Microphone not available');
-                        this.setState(States.IDLE);
-                        this.isActive = false;
-                        this.updateButton();
-                        break;
-
-                    case 'not-allowed':
-                        // Permission denied - critical error
-                        console.error('   - Permission denied - stopping session');
-                        this.updateStatus('Error: Microphone permission denied');
-                        this.setState(States.IDLE);
-                        this.isActive = false;
-                        this.updateButton();
-                        break;
-
-                    case 'network':
-                        // Network error - critical for some browsers
-                        console.error('   - Network error - stopping session');
-                        this.updateStatus('Error: Network issue');
-                        this.setState(States.IDLE);
-                        this.isActive = false;
-                        this.updateButton();
-                        break;
-
-                    default:
-                        // Other errors - log but continue
-                        console.warn(`   - Unhandled error type: ${event.error} (continuing...)`);
-                        break;
-                }
-            } catch (err) {
-                console.error('❌ Exception in onerror handler:', err);
             }
+
+            // For other cancellations, just log
+            console.log('   Recognition will restart automatically if session is active');
         };
 
-        this.recognition.onend = () => {
-            console.log('🔴 Speech recognition ended');
-            console.log(`   - Current state: ${this.currentState}`);
-            console.log(`   - Is active: ${this.isActive}`);
+        // Azure Speech SDK event: sessionStopped
+        this.recognition.sessionStopped = (s, e) => {
+            console.log('🔴 Azure Speech recognition session stopped');
 
-            // Update recognition status display
-            if (this.recognitionStatusElement) {
-                this.recognitionStatusElement.textContent = '🔴 Recognition: Stopped';
-            }
-
-            // Restart immediately if session is active and not in THINKING/TALKING states
-            // (IDLE, LISTENING, and WAITING all need recognition to be active)
+            // Restart if session is still active and not in THINKING/TALKING
             if (this.isActive && this.currentState !== States.THINKING && this.currentState !== States.TALKING) {
-                console.log('   - Restarting recognition immediately...');
-                try {
-                    this.recognition.start();
-                    console.log('   ✅ Recognition restarted');
-                } catch (error) {
-                    // If start() fails (already running), retry after brief delay
-                    if (error.message && error.message.includes('already')) {
-                        console.log('   ⚠️ Recognition already running, no restart needed');
-                    } else {
-                        console.error('   ❌ Failed to restart recognition:', error);
-                        // Retry after 50ms
-                        setTimeout(() => {
-                            if (this.isActive && this.currentState !== States.THINKING && this.currentState !== States.TALKING) {
-                                try {
-                                    this.recognition.start();
-                                    console.log('   ✅ Recognition restarted (retry)');
-                                } catch (retryError) {
-                                    console.error('   ❌ Retry failed:', retryError);
-                                }
-                            }
-                        }, 50);
+                console.log('   - Restarting recognition...');
+                setTimeout(() => {
+                    if (this.isActive) {
+                        try {
+                            this.recognition.startContinuousRecognitionAsync();
+                        } catch (error) {
+                            console.error('   - Failed to restart:', error);
+                        }
                     }
-                }
-            } else {
-                console.log('   - Not restarting (inactive or in THINKING/TALKING state)');
+                }, 100);
             }
         };
     }
+
 
     attachEventListeners() {
         this.startButton.addEventListener('click', () => this.toggleListening());
         this.languageButton.addEventListener('click', () => this.toggleLanguage());
         this.timerToggleButton.addEventListener('click', () => this.toggleTimerVisibility());
         this.settingsToggleButton.addEventListener('click', () => this.toggleSettings());
+        this.debugToggleButton.addEventListener('click', () => this.toggleDebug());
     }
 
     async toggleListening() {
@@ -391,40 +569,25 @@ class TranslatorApp {
             await audioSync.initializeMicrophone();
 
             this.isActive = true;
-            // Stay in IDLE state - will transition to LISTENING when audio detected
-            this.setState(States.IDLE);
+
+            // Start Azure Speech continuous recognition
+            console.log('🎙️ Starting Azure Speech continuous recognition...');
+            this.recognition.startContinuousRecognitionAsync(
+                () => {
+                    console.log('✅ Azure Speech recognition started successfully');
+                },
+                (error) => {
+                    console.error('❌ Failed to start Azure Speech recognition:', error);
+                    throw error;
+                }
+            );
+
+            // Go directly to LISTENING state for instant response
+            this.setState(States.LISTENING);
             this.updateButton();
 
-            // Start speech recognition (only if not already running)
-            try {
-                this.recognition.start();
-                console.log('Speech recognition started successfully');
-            } catch (error) {
-                if (error.message && error.message.includes('already started')) {
-                    console.log('Speech recognition already running, continuing...');
-                } else {
-                    throw error; // Re-throw if it's a different error
-                }
-            }
-
-            // Start listening animation but stay in idle visually until speech
+            // Start listening animation immediately
             audioSync.startListeningAnimation(this.avatarElement);
-
-            // Register volume callback to transition to LISTENING when audio detected
-            audioSync.setVolumeCallback((volume) => {
-                if (this.currentState === States.IDLE && this.isActive) {
-                    console.log(`🔊 Audio detected - scaling up immediately and transitioning to LISTENING`);
-
-                    // Immediately scale to 100% (bypassing CSS transition for instant response)
-                    this.avatarElement.style.transform = 'scale(1.0)';
-
-                    // Then transition state (this will start frame animation)
-                    this.setState(States.LISTENING);
-
-                    // Clear this callback, we only need it once
-                    audioSync.clearVolumeCallback();
-                }
-            });
         } catch (error) {
             console.error('Error starting listening:', error);
             alert(error.message);
@@ -444,6 +607,12 @@ class TranslatorApp {
         // Clear no audio timer
         this.clearNoAudioTimer();
 
+        // Clear interim result timer
+        if (this.interimResultTimer) {
+            clearTimeout(this.interimResultTimer);
+            this.interimResultTimer = null;
+        }
+
         // Clear volume callback
         audioSync.clearVolumeCallback();
 
@@ -456,12 +625,16 @@ class TranslatorApp {
         this.transcriptionElement.textContent = '';
         this.translationElement.textContent = '';
 
-        // Stop all ongoing processes
-        try {
-            this.recognition.stop();
-            console.log('Speech recognition stopped');
-        } catch (error) {
-            console.log('Recognition already stopped or error:', error);
+        // Stop Azure Speech continuous recognition
+        if (this.recognition) {
+            this.recognition.stopContinuousRecognitionAsync(
+                () => {
+                    console.log('✅ Azure Speech recognition stopped');
+                },
+                (error) => {
+                    console.log('⚠️ Error stopping recognition:', error);
+                }
+            );
         }
         this.synthesis.cancel();
 
@@ -587,9 +760,9 @@ class TranslatorApp {
             this.setState(States.LISTENING);
             console.log('   - Timer interrupted. Transitioning to LISTENING state.');
 
-            // Start listening animation
+            // Start listening animation (no-audio timer auto-started by setState)
             audioSync.startListeningAnimation(this.avatarElement);
-        }, 100);
+        }, 50);
     }
 
     startNoAudioTimer() {
@@ -598,7 +771,69 @@ class TranslatorApp {
 
         console.log(`⏰ Starting no audio timer (${this.noAudioTimeout}ms)`);
         this.noAudioTimer = setTimeout(() => {
-            console.log('⏰ No audio detected for 5 seconds - transitioning to IDLE');
+            console.log('⏰ No audio detected for 5 seconds');
+
+            // Check if there's valid transcript that should be processed
+            if (this.lastTranscript && this.lastTranscript.trim() !== '') {
+                console.log('   - Valid transcript exists, validating and entering WAITING state');
+                console.log(`   - Transcript: "${this.lastTranscript}"`);
+
+                // Validate the transcript
+                if (this.validateSpeech(this.lastTranscript)) {
+                    console.log('   ✅ Transcript valid - entering WAITING state');
+
+                    // Enter WAITING state
+                    this.setState(States.WAITING);
+                    audioSync.stopListeningAnimation();
+                    audioSync.startVolumeMonitoring();
+
+                    // Set up timer for translation
+                    const waitingVolumeThreshold = 50;
+                    audioSync.setVolumeCallback((volume) => {
+                        if (this.currentState === States.WAITING && volume > waitingVolumeThreshold) {
+                            console.log(`🔊 Volume detected during WAITING: ${volume.toFixed(1)} - interrupting timer!`);
+                            this.interruptWaitingState();
+                        }
+                    });
+
+                    if (this.showTimer) {
+                        audioSync.playTimerAnimation(this.avatarElement, this.cooldownDuration, () => {
+                            audioSync.clearVolumeCallback();
+                            if (this.lastTranscript && this.validateSpeech(this.lastTranscript)) {
+                                this.handleTranslation(this.lastTranscript);
+                            } else {
+                                console.error('❌ Validation failed - returning to IDLE');
+                                this.lastTranscript = '';
+                                this.transcriptionElement.textContent = '';
+                                this.setState(States.IDLE);
+                                this.showIdleImage();
+                            }
+                        });
+                    }
+
+                    this.translationTimer = setTimeout(() => {
+                        if (!this.showTimer) {
+                            audioSync.clearVolumeCallback();
+                            if (this.lastTranscript && this.validateSpeech(this.lastTranscript)) {
+                                this.handleTranslation(this.lastTranscript);
+                            } else {
+                                console.error('❌ Validation failed - returning to IDLE');
+                                this.lastTranscript = '';
+                                this.transcriptionElement.textContent = '';
+                                this.setState(States.IDLE);
+                                this.showIdleImage();
+                            }
+                        }
+                    }, this.cooldownDuration);
+                } else {
+                    console.log('   ❌ Transcript invalid - clearing and returning to IDLE');
+                    this.lastTranscript = '';
+                    this.transcriptionElement.textContent = '';
+                    this.showIdleImage();
+                    this.setState(States.IDLE);
+                }
+                return;
+            }
 
             // Only transition if still in LISTENING state and session is active
             if (this.currentState === States.LISTENING && this.isActive) {
@@ -626,22 +861,21 @@ class TranslatorApp {
     }
 
     async handleTranslation(text) {
-        console.log(`🌐 handleTranslation called with: "${text}"`);
+        console.log(`🌐 handleTranslation called`);
+        console.log(`   Text: "${text}"`);
+        console.log(`   Text length: ${text ? text.length : 0}`);
+        console.log(`   Current state: ${this.currentState}`);
 
         if (!text || text.trim() === '') {
             // No content to translate - return to IDLE
-            console.log('⚠️ No content to translate - returning to IDLE');
+            console.error('❌ No content to translate - returning to IDLE');
 
             if (this.isActive) {
                 // Return to IDLE and stay there
                 this.showIdleImage();
                 this.setState(States.IDLE);
 
-                try {
-                    this.recognition.start();
-                } catch (err) {
-                    console.log('Recognition already started or error:', err);
-                }
+                // Azure continuous recognition stays running automatically
 
                 // Note: Speech recognition continues, will detect when user speaks again
             } else {
@@ -675,25 +909,53 @@ class TranslatorApp {
         audioSync.startThinkingAnimation(this.avatarElement);
 
         try {
-            // Get API key
-            const apiKey = this.apiKeyInput.value.trim();
+            // Determine source and target languages
+            let detectedLang, targetLang;
 
-            // Translate with auto-detection
-            const result = await translate(text, this.sourceLang, this.targetLang, apiKey, this.autoDetect);
-            const translation = result.translation;
-            const detectedLang = result.detectedLang;
-            const targetLang = result.targetLang;
+            if (this.autoDetect) {
+                // AUTO mode: Detect language from text
+                detectedLang = detectLanguage(text);
+                targetLang = detectedLang === 'zh-CN' ? 'en-US' : 'zh-CN';
+                console.log(`🌐 AUTO mode - Detected: ${detectedLang} → ${targetLang}`);
+            } else {
+                // MANUAL mode: Use user-selected languages
+                detectedLang = this.sourceLang;
+                targetLang = this.targetLang;
+                console.log(`🌐 MANUAL mode - Using: ${detectedLang} → ${targetLang}`);
+            }
 
             // Log detected language for debugging
             const sourceName = detectedLang === 'zh-CN' ? 'ZH' : 'EN';
             const targetName = targetLang === 'zh-CN' ? 'ZH' : 'EN';
-            console.log(`🌐 Detected: ${sourceName} → ${targetName}`);
+            console.log(`   Translation: ${sourceName} → ${targetName}`);
 
-            // Update language display (only if NOT in auto-detect mode)
-            if (!this.autoDetect) {
+            // Update language display (only if in auto-detect mode)
+            if (this.autoDetect) {
                 this.langDirection.textContent = `${sourceName} → ${targetName}`;
             }
-            // If in auto-detect mode, keep display as "AUTO"
+
+            // Translate using Azure Speech Translation
+            console.log('🔄 Translating with Azure Speech...');
+            const translation = await this.translateWithAzure(text, detectedLang, targetLang);
+
+            // Validate translation output before speaking
+            if (!this.validateSpeech(translation)) {
+                console.log('❌ Translation result is invalid/nonsensical - skipping speech');
+                this.translationElement.textContent = '[Invalid translation - try again]';
+                audioSync.stopThinkingAnimation();
+
+                // Return to IDLE and restart recognition
+                if (this.isActive) {
+                    this.showIdleImage();
+                    this.setState(States.IDLE);
+                    try {
+                        this.recognition.start();
+                    } catch (err) {
+                        console.log('Recognition already started or error:', err);
+                    }
+                }
+                return;
+            }
 
             this.translationElement.textContent = translation;
 
@@ -712,11 +974,7 @@ class TranslatorApp {
             if (this.isActive) {
                 this.showIdleImage();
                 this.setState(States.IDLE);
-                try {
-                    this.recognition.start();
-                } catch (err) {
-                    console.log('Recognition already started or error:', err);
-                }
+                // Azure continuous recognition stays running automatically
                 // Note: Speech recognition continues, will detect when user speaks again
             } else {
                 this.showIdleImage();
@@ -725,28 +983,157 @@ class TranslatorApp {
         }
     }
 
+    async translateWithAzure(text, sourceLang, targetLang) {
+        try {
+            // Use Azure Translator API via backend
+            console.log(`📡 Calling Azure Translator API: ${sourceLang} → ${targetLang}`);
+
+            const response = await fetch('http://localhost:3000/api/translate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    text: text,
+                    from: sourceLang === 'en-US' ? 'en' : 'zh-Hans',
+                    to: targetLang === 'zh-CN' ? 'zh-Hans' : 'en'
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Translation API error: ${response.status}`);
+            }
+
+            const data = await response.json();
+            return data.translation;
+        } catch (error) {
+            console.error('❌ Azure translation failed:', error);
+            // Fallback: return original text
+            return text;
+        }
+    }
+
     async speak(text, lang = null) {
         console.log('🗣️ Starting speech synthesis');
         console.log(`   Text: "${text.substring(0, 50)}..."`);
         console.log(`   Language: ${lang || this.targetLang}`);
 
-        // Get API key from input
-        const apiKey = this.apiKeyInput.value.trim();
-        console.log(`   API Key provided: ${apiKey ? 'Yes' : 'No'}`);
+        // Always use Azure Speech TTS (managed by backend)
+        console.log('✅ Using Azure Speech TTS');
+        return await this.speakWithAzureBackend(text, lang || this.targetLang);
+    }
 
-        if (apiKey) {
-            const keyType = detectAPIKeyType(apiKey);
-            console.log(`   Detected key type: ${keyType}`);
+    async speakWithAzureBackend(text, lang) {
+        try {
+            console.log(`📡 Calling Azure Speech TTS via backend`);
 
-            // Check if we should use Azure Speech TTS
-            if (keyType === 'azure') {
-                console.log('✅ Using Azure Speech TTS');
-                return await this.speakWithAzure(text, lang || this.targetLang, apiKey);
+            const response = await fetch('http://localhost:3000/api/synthesize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    text: text,
+                    lang: lang
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`TTS API error: ${response.status}`);
             }
-        }
 
-        console.log('Using browser SpeechSynthesis (no Azure key or different key type)');
-        return await this.speakWithBrowser(text, lang || this.targetLang);
+            // Get audio blob
+            const audioBlob = await response.blob();
+
+            // Initialize audio context if needed
+            if (!this.audioContext) {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            // Resume context if suspended
+            if (this.audioContext.state === 'suspended') {
+                await this.audioContext.resume();
+            }
+
+            // Convert blob to array buffer
+            const arrayBuffer = await audioBlob.arrayBuffer();
+            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+            // Create source and analyzer for volume analysis
+            const source = this.audioContext.createBufferSource();
+            const analyser = this.audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.7;
+
+            source.buffer = audioBuffer;
+            source.connect(analyser);
+            analyser.connect(this.audioContext.destination);
+
+            this.currentAudioSource = source;
+
+            // Start playing and enter TALKING state
+            return new Promise((resolve) => {
+                console.log('🎙️ Azure TTS playback started - entering TALKING state');
+                this.setState(States.TALKING);
+
+                // Start animation with real-time volume analysis and SMOOTH EASING
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                let currentSpeed = 1.0; // Start at normal speed
+                const easingFactor = 0.2; // Higher = faster response, Lower = smoother (0.1-0.3 recommended)
+
+                const getVolumeMultiplier = () => {
+                    analyser.getByteFrequencyData(dataArray);
+                    const sum = dataArray.reduce((a, b) => a + b, 0);
+                    const average = sum / dataArray.length;
+                    const max = Math.max(...dataArray);
+                    const volume = (average * 0.5) + (max * 0.5);
+
+                    // Map volume (0-255) to target speed multiplier (1x-10x) - DRAMATIC range
+                    // Low volume → 1x (normal speed)
+                    // High volume → 10x (very fast, exaggerated lip movement)
+                    const normalizedVolume = Math.min(volume, 255) / 255; // 0.0 to 1.0
+                    const targetSpeed = 1.0 + (normalizedVolume * 9.0); // 1.0x to 10.0x
+
+                    // SMOOTH EASING: Interpolate current speed towards target speed
+                    // This creates ease-in/ease-out effect, preventing abrupt changes
+                    currentSpeed += (targetSpeed - currentSpeed) * easingFactor;
+
+                    return currentSpeed;
+                };
+
+                audioSync.startTalkingAnimation(this.avatarElement, getVolumeMultiplier);
+                console.log('   Talking animation started with Azure audio analysis');
+
+                source.onended = () => {
+                    console.log('Azure TTS playback ended');
+                    this.currentAudioSource = null;
+                    audioSync.stopTalkingAnimation(this.avatarElement);
+                    this.showIdleImage();
+
+                    // Clear transcripts for next round
+                    this.lastTranscript = '';
+                    this.transcriptionElement.textContent = '';
+                    console.log('🧹 Cleared transcripts for next session');
+
+                    // If session is still active, return to IDLE and restart recognition
+                    if (this.isActive) {
+                        this.setState(States.IDLE);
+                        // Azure continuous recognition stays running automatically
+                    } else {
+                        this.setState(States.IDLE);
+                    }
+
+                    resolve();
+                };
+
+                source.start(0);
+                console.log('   Audio source started');
+            });
+        } catch (error) {
+            console.error('❌ Azure TTS failed:', error);
+            // Fallback to browser speech synthesis
+            await this.speakWithBrowser(text, lang);
+        }
     }
 
     async speakWithAzure(text, lang, azureKey) {
@@ -792,8 +1179,11 @@ class TranslatorApp {
                 console.log('🎙️ Azure TTS playback started - entering TALKING state');
                 this.setState(States.TALKING);
 
-                // Start animation with real-time volume analysis
+                // Start animation with real-time volume analysis and SMOOTH EASING
                 const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                let currentSpeed = 1.0; // Start at normal speed
+                const easingFactor = 0.2; // Higher = faster response, Lower = smoother (0.1-0.3 recommended)
+
                 const getVolumeMultiplier = () => {
                     analyser.getByteFrequencyData(dataArray);
                     const sum = dataArray.reduce((a, b) => a + b, 0);
@@ -801,17 +1191,17 @@ class TranslatorApp {
                     const max = Math.max(...dataArray);
                     const volume = (average * 0.5) + (max * 0.5);
 
-                    // Map volume (0-255) to speed multiplier (0.5x to 2.0x)
-                    // Low volume (0-50) -> 0.5x speed
-                    // Medium volume (50-150) -> 1.0x speed
-                    // High volume (150+) -> 2.0x speed
-                    if (volume < 50) {
-                        return 0.5 + (volume / 50) * 0.5; // 0.5x to 1.0x
-                    } else if (volume < 150) {
-                        return 1.0; // 1.0x (normal)
-                    } else {
-                        return 1.0 + Math.min(1.0, (volume - 150) / 100); // 1.0x to 2.0x
-                    }
+                    // Map volume (0-255) to target speed multiplier (1x-10x) - DRAMATIC range
+                    // Low volume → 1x (normal speed)
+                    // High volume → 10x (very fast, exaggerated lip movement)
+                    const normalizedVolume = Math.min(volume, 255) / 255; // 0.0 to 1.0
+                    const targetSpeed = 1.0 + (normalizedVolume * 9.0); // 1.0x to 10.0x
+
+                    // SMOOTH EASING: Interpolate current speed towards target speed
+                    // This creates ease-in/ease-out effect, preventing abrupt changes
+                    currentSpeed += (targetSpeed - currentSpeed) * easingFactor;
+
+                    return currentSpeed;
                 };
 
                 audioSync.startTalkingAnimation(this.avatarElement, getVolumeMultiplier);
@@ -861,7 +1251,7 @@ class TranslatorApp {
                 // Speak
                 console.log('   📢 Calling synthesis.speak()');
                 this.synthesis.speak(utterance);
-            }, 100);
+            }, 50);
         });
     }
 
@@ -1010,11 +1400,7 @@ class TranslatorApp {
                     this.setState(States.IDLE);
 
                     // Restart speech recognition but stay in IDLE
-                    try {
-                        this.recognition.start();
-                    } catch (error) {
-                        console.log('   Recognition already started or error:', error);
-                    }
+                    // Azure continuous recognition stays running automatically
 
                     // Note: Speech recognition continues, will detect when user speaks again
                 } else {
@@ -1028,11 +1414,7 @@ class TranslatorApp {
                     this.showIdleImage();
                     this.setState(States.IDLE);
 
-                    try {
-                        this.recognition.start();
-                    } catch (error) {
-                        console.log('   Recognition already started or error:', error);
-                    }
+                    // Azure continuous recognition stays running automatically
 
                     // Note: Speech recognition continues, will detect when user speaks again
                 }
@@ -1051,27 +1433,45 @@ class TranslatorApp {
             this.sourceLang = 'en-US';
             this.targetLang = 'zh-CN';
             this.langDirection.textContent = 'EN → ZH';
-            this.recognition.lang = 'en-US';
+            this.currentRecognitionLang = 'en-US';
             console.log('📍 Switched to manual mode: EN → ZH (recognition: en-US)');
         } else if (this.sourceLang === 'en-US') {
             // Switch to manual mode: ZH → EN
             this.sourceLang = 'zh-CN';
             this.targetLang = 'en-US';
             this.langDirection.textContent = 'ZH → EN';
-            this.recognition.lang = 'zh-CN';
+            this.currentRecognitionLang = 'zh-CN';
             console.log('📍 Switched to manual mode: ZH → EN (recognition: zh-CN)');
         } else {
             // Switch back to auto mode
             this.autoDetect = true;
             this.langDirection.textContent = 'AUTO';
-            // In AUTO mode, use Chinese recognition (can often pick up English too)
-            this.recognition.lang = 'zh-CN';
+            this.currentRecognitionLang = 'zh-CN';
             console.log('📍 Switched to AUTO mode (recognition: zh-CN for better Chinese support)');
         }
 
         // Clear previous results
         this.transcriptionElement.textContent = '';
         this.translationElement.textContent = '';
+
+        // Restart recognition if session is active to apply language change
+        if (this.isActive) {
+            console.log('🔄 Recreating Azure recognizer with new language...');
+
+            // Stop current recognition
+            if (this.recognition) {
+                this.recognition.stopContinuousRecognitionAsync(() => {
+                    // Recreate recognizer with new language
+                    this.createAzureRecognizer();
+
+                    // Restart recognition
+                    this.recognition.startContinuousRecognitionAsync(
+                        () => console.log('✅ Recognition restarted with new language'),
+                        (error) => console.error('❌ Failed to restart:', error)
+                    );
+                });
+            }
+        }
     }
 
     toggleTimerVisibility() {
@@ -1094,14 +1494,38 @@ class TranslatorApp {
     }
 
     toggleSettings() {
+        // Close debug panel if open
+        if (this.debugPanel.style.display === 'block') {
+            this.debugPanel.style.display = 'none';
+            this.debugToggleText.textContent = 'Debug Tools';
+        }
+
         if (this.settingsPanel.style.display === 'none') {
             this.settingsPanel.style.display = 'block';
-            this.settingsToggleText.textContent = '⚙️ Hide Settings';
+            this.settingsToggleText.textContent = 'Hide Settings';
             console.log('⚙️ Settings panel opened');
         } else {
             this.settingsPanel.style.display = 'none';
-            this.settingsToggleText.textContent = '⚙️ Settings';
+            this.settingsToggleText.textContent = 'Settings';
             console.log('⚙️ Settings panel closed');
+        }
+    }
+
+    toggleDebug() {
+        // Close settings panel if open
+        if (this.settingsPanel.style.display === 'block') {
+            this.settingsPanel.style.display = 'none';
+            this.settingsToggleText.textContent = 'Settings';
+        }
+
+        if (this.debugPanel.style.display === 'none') {
+            this.debugPanel.style.display = 'block';
+            this.debugToggleText.textContent = 'Hide Debug Tools';
+            console.log('🔧 Debug tools panel opened');
+        } else {
+            this.debugPanel.style.display = 'none';
+            this.debugToggleText.textContent = 'Debug Tools';
+            console.log('🔧 Debug tools panel closed');
         }
     }
 
@@ -1109,6 +1533,13 @@ class TranslatorApp {
         const oldState = this.currentState;
         this.currentState = newState;
         this.updateStatus(this.getStatusText(newState));
+
+        // Log state change with transcript info
+        if (oldState === States.LISTENING && newState === States.IDLE) {
+            console.log(`⚠️ LISTENING → IDLE transition`);
+            console.log(`   Current transcript: "${this.lastTranscript}"`);
+            console.log(`   Display text: "${this.transcriptionElement.textContent}"`);
+        }
 
         // Update body class for CSS state styling
         document.body.className = `state-${newState}`;
@@ -1130,6 +1561,11 @@ class TranslatorApp {
         } else {
             // Clear timer when leaving LISTENING state
             this.clearNoAudioTimer();
+            // Also clear interim result timer when leaving LISTENING
+            if (this.interimResultTimer) {
+                clearTimeout(this.interimResultTimer);
+                this.interimResultTimer = null;
+            }
         }
 
         // Log state change
@@ -1168,6 +1604,34 @@ class TranslatorApp {
     }
 }
 
+// Wait for Azure Speech SDK to load
+function waitForSpeechSDK() {
+    return new Promise((resolve) => {
+        if (window.SpeechSDK) {
+            console.log('✅ Azure Speech SDK already loaded');
+            resolve();
+            return;
+        }
+
+        console.log('⏳ Waiting for Azure Speech SDK to load...');
+        let attempts = 0;
+        const maxAttempts = 50; // 5 seconds max wait
+        const checkInterval = setInterval(() => {
+            attempts++;
+            if (window.SpeechSDK) {
+                console.log('✅ Azure Speech SDK loaded');
+                clearInterval(checkInterval);
+                resolve();
+            } else if (attempts >= maxAttempts) {
+                console.error('❌ Azure Speech SDK failed to load after 5 seconds');
+                clearInterval(checkInterval);
+                alert('Failed to load Azure Speech SDK. Please refresh the page or check your internet connection.');
+                resolve(); // Resolve anyway to not block initialization
+            }
+        }, 100);
+    });
+}
+
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
     // Check if page is opened via file:// protocol
@@ -1179,6 +1643,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.warn('💡 Solution: Serve the page over HTTP using serve.bat (Windows) or serve.sh (Mac/Linux)');
         }
     }
+
+    // Wait for Azure Speech SDK to be available
+    await waitForSpeechSDK();
 
     const app = new TranslatorApp();
     console.log('Translator app initialized');
@@ -1196,6 +1663,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Redraw current image to apply new scale immediately
             app.showIdleImage();
             console.log(`Avatar scale updated to ${value}%`);
+        });
+    }
+
+    // Cooldown timer slider handler
+    const cooldownSlider = document.getElementById('cooldown-timer');
+    const cooldownValue = document.getElementById('cooldown-timer-value');
+
+    if (cooldownSlider && cooldownValue) {
+        cooldownSlider.addEventListener('input', (e) => {
+            const value = parseInt(e.target.value);
+            app.cooldownDuration = value;
+            cooldownValue.textContent = (value / 1000).toFixed(1) + 's';
+            console.log(`Cooldown duration updated to ${value}ms (${(value / 1000).toFixed(1)}s)`);
         });
     }
 

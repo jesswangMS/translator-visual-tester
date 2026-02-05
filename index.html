@@ -33,57 +33,56 @@
             </div>
         </div>
 
-        <!-- Start/Stop Button (Always Visible) -->
-        <button id="start-btn" class="btn btn-primary">
-            <span id="btn-text">Start Session</span>
-        </button>
+        <!-- Control Buttons (Always Visible) -->
+        <div class="control-buttons">
+            <!-- Start/Stop Button -->
+            <button id="start-btn" class="btn btn-primary">
+                <span id="btn-text">Start Session</span>
+            </button>
 
-        <!-- Timer Toggle Button -->
-        <button id="timer-toggle-btn" class="btn btn-secondary">
-            <span id="timer-toggle-text">Show Timer</span>
-        </button>
+            <!-- Settings Toggle Button -->
+            <button id="settings-toggle" class="btn btn-secondary">
+                <span id="settings-toggle-text">Settings</span>
+            </button>
 
-        <!-- Settings Toggle Button -->
-        <button id="settings-toggle" class="btn btn-secondary settings-toggle">
-            <span id="settings-toggle-text">⚙️ Settings</span>
-        </button>
+            <!-- Debug Tools Toggle Button -->
+            <button id="debug-toggle" class="btn btn-secondary">
+                <span id="debug-toggle-text">Debug Tools</span>
+            </button>
+        </div>
 
-        <!-- Collapsible Settings Panel -->
+        <!-- ========== SETTINGS PANEL ========== -->
         <div id="settings-panel" class="settings-panel" style="display: none;">
-            <!-- Language Toggle -->
-            <div class="language-toggle">
-                <button id="language-btn" class="btn btn-secondary">
+            <h3 style="margin-top: 0; color: #1976d2;">⚙️ Settings</h3>
+
+            <!-- Info Section -->
+            <div class="api-key-section">
+                <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <strong>🎙️ Powered by Azure Speech Services</strong><br>
+                    <small>
+                        This app uses Azure Speech for recognition, translation, and text-to-speech.<br>
+                        Configure your API key in the <code>.env</code> file and run <code>npm start</code> to begin.<br>
+                        <a href="https://portal.azure.com/" target="_blank">Get free Azure Speech key</a> (5 hours/month free)
+                    </small>
+                </div>
+            </div>
+
+            <!-- Language Detection -->
+            <div class="api-key-section">
+                <label>Language Detection:</label>
+                <button id="language-btn" class="btn btn-secondary" style="width: 100%; margin-top: 8px;">
                     <span id="lang-direction">AUTO</span>
                 </button>
+                <small>Switch between automatic language detection or manual language selection</small>
             </div>
 
-            <!-- API Key Input (Optional) -->
+            <!-- Show/Hide Timer Toggle -->
             <div class="api-key-section">
-                <label for="api-key">API Key (optional for Gemini/Azure):</label>
-                <input
-                    type="password"
-                    id="api-key"
-                    placeholder="AIza... for Gemini or Azure Speech key"
-                    autocomplete="off"
-                >
-                <small><strong>🤖 Claude API:</strong> Automatic via backend server (run <code>npm start</code>) - See README_CLAUDE_SETUP.md<br>
-                <strong>🔮 Gemini API:</strong> Enter key above (AIza...) - Get free key at <a href="https://aistudio.google.com/app/apikey" target="_blank">AI Studio</a><br>
-                <strong>🎙️ Azure Speech TTS:</strong> Enter key above (32-char) - Get free key at <a href="https://portal.azure.com/" target="_blank">Azure Portal</a><br>
-                <strong>🆓 Free API:</strong> MyMemory (no key needed, used as fallback)</small>
-            </div>
-
-            <!-- Azure Region Input (Only for Azure Speech) -->
-            <div class="api-key-section">
-                <label for="azure-region">Azure Region (if using Azure Speech):</label>
-                <input
-                    type="text"
-                    id="azure-region"
-                    placeholder="e.g., eastus, westeurope, swedencentral"
-                    value="eastus"
-                    autocomplete="off"
-                >
-                <small>Enter your Azure Speech resource region. Common regions: eastus, westus, westeurope, swedencentral, etc.<br>
-                Find your region in Azure Portal → Your Speech Resource → Keys and Endpoint</small>
+                <label>Timer Animation:</label>
+                <button id="timer-toggle-btn" class="btn btn-secondary" style="width: 100%; margin-top: 8px;">
+                    <span id="timer-toggle-text">Hide Timer</span>
+                </button>
+                <small>Show or hide the countdown timer animation after you stop speaking</small>
             </div>
 
             <!-- Avatar Size Slider -->
@@ -100,6 +99,40 @@
                 >
                 <small>Adjust the size of the interpreter avatar (20% = very small, 100% = full canvas)</small>
             </div>
+
+            <!-- Wait Time Slider -->
+            <div class="api-key-section">
+                <label for="cooldown-timer">Wait Time: <span id="cooldown-timer-value">2.5s</span></label>
+                <input
+                    type="range"
+                    id="cooldown-timer"
+                    min="1000"
+                    max="2500"
+                    value="2500"
+                    step="100"
+                    style="width: 100%;"
+                >
+                <small>How long to wait after you stop speaking before translation begins (1.0s = fast, 2.5s = patient)</small>
+            </div>
+
+            <!-- Instructions -->
+            <div class="instructions">
+                <h3>How to use:</h3>
+                <ol>
+                    <li>Click "Start Session" and allow microphone access</li>
+                    <li>Speak clearly in either English or Chinese</li>
+                    <li>The translator will automatically detect your language and translate to the other</li>
+                    <li>The avatar will listen, think, and speak the translation</li>
+                    <li>After translation, the avatar returns to listening automatically</li>
+                    <li>Click "Stop Session" when finished</li>
+                </ol>
+                <p class="note">Note: Works best in Chrome or Edge browsers</p>
+            </div>
+        </div>
+
+        <!-- ========== DEBUG TOOLS PANEL ========== -->
+        <div id="debug-panel" class="settings-panel" style="display: none;">
+            <h3 style="margin-top: 0; color: #f57c00;">🔧 Debug Tools</h3>
 
             <!-- Transcription Display -->
             <div class="transcription-box">
@@ -138,26 +171,13 @@
                     </div>
                 </div>
             </div>
-
-            <!-- Instructions -->
-            <div class="instructions">
-                <h3>How to use:</h3>
-                <ol>
-                    <li>Click "Start Session" and allow microphone access</li>
-                    <li>Speak clearly in either English or Chinese</li>
-                    <li>The translator will automatically detect your language and translate to the other</li>
-                    <li>The avatar will listen, think, and speak the translation</li>
-                    <li>After translation, the avatar returns to listening automatically</li>
-                    <li>Click "Stop Session" when finished</li>
-                    <li>(Optional) Click the language button to switch between AUTO, EN→ZH, and ZH→EN modes</li>
-                    <li>(Optional) Add your Gemini API key for better translations</li>
-                    <li>(Optional) Add your Azure Speech key for better voice quality and perfect lip-sync</li>
-                </ol>
-                <p class="note">Note: Works best in Chrome or Edge browsers</p>
-            </div>
         </div>
     </div>
 
+    <!-- Azure Speech SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.36.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle.min.js"></script>
+
+    <script src="azureSpeech.js"></script>
     <script src="translator.js"></script>
     <script src="audioSync.js"></script>
     <script src="app.js"></script>

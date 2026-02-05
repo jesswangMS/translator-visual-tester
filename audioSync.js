@@ -17,7 +17,7 @@ class AudioSync {
         this.talkingFrame = 0;
         this.isMicrophoneInitialized = false;
         this.volumeCallback = null; // Callback for volume detection
-        this.volumeThreshold = 8; // Threshold to detect speech (lower = faster response)
+        this.volumeThreshold = 20; // Threshold to detect speech (lower = more sensitive, higher = less sensitive)
         this.loopCount = 0; // Track animation loops
         this.smoothedVolume = 0; // Smoothed volume for listening animation
         this.volumeSmoothingFactor = 0.8; // Higher = faster response to volume changes (0-1, higher is faster)
@@ -393,14 +393,16 @@ class AudioSync {
     }
 
     // Timer animation - 75 frames at 30fps (2.5 seconds)
-    playTimerAnimation(avatarElement, onComplete) {
-        console.log('⏱️ Starting custom timer animation (75 frames, 30fps)');
+    playTimerAnimation(avatarElement, duration, onComplete) {
+        const totalFrames = 75;
+        const frameDelay = duration / totalFrames; // Dynamic frame delay based on duration
+        const fps = (1000 / frameDelay).toFixed(1); // Calculate effective FPS
+
+        console.log(`⏱️ Starting timer animation (${totalFrames} frames over ${duration}ms, ${fps} fps)`);
+        console.log(`   Frame delay: ${frameDelay.toFixed(1)}ms per frame`);
         console.log(`   Using sprite sheet: images/sprites/timer_sprite.png`);
 
         let currentFrame = 0;
-        const totalFrames = 75;
-        const fps = 30;
-        const frameDelay = 1000 / fps; // ~33ms per frame
 
         const playFrame = () => {
             if (currentFrame < totalFrames) {
@@ -418,9 +420,10 @@ class AudioSync {
 
                 currentFrame++;
 
-                // Log progress every 15 frames (~0.5 seconds)
+                // Log progress every 15 frames
                 if (currentFrame % 15 === 0) {
-                    const secondsRemaining = ((totalFrames - currentFrame) / fps).toFixed(1);
+                    const msRemaining = (totalFrames - currentFrame) * frameDelay;
+                    const secondsRemaining = (msRemaining / 1000).toFixed(1);
                     console.log(`⏱️ Timer: ${secondsRemaining}s remaining (frame ${currentFrame}/${totalFrames})`);
                 }
 
@@ -457,14 +460,15 @@ class AudioSync {
         }
     }
 
-    // Talking animation - 60 frames PNG sequence at constant 15 fps
+    // Talking animation - 60 frames PNG sequence with DYNAMIC speed (1x-10x based on audio)
     async startTalkingAnimation(avatarElement, getRateMultiplier = null) {
         if (this.isTalking) {
             console.warn('⚠️ Talking animation already running!');
             return;
         }
 
-        console.log('🗣️ Starting talking animation at constant 15 fps');
+        const useDynamicSpeed = getRateMultiplier !== null;
+        console.log(`🗣️ Starting talking animation (${useDynamicSpeed ? 'DYNAMIC 1x-10x speed' : 'constant 15fps'})`);
         console.log('   Using canvas rendering for instant frame updates');
 
         this.isTalking = true;
@@ -473,10 +477,10 @@ class AudioSync {
 
         await this.ensureAudioContext();
 
-        // Constant 15 fps for smooth, consistent playback
-        const fps = 15;
+        // Base settings
+        const baseFps = 15;
         const totalFrames = 60;
-        const frameDelay = Math.round(1000 / fps); // ~67ms per frame
+        const baseFrameDelay = Math.round(1000 / baseFps); // ~67ms per frame
         let logCounter = 0;
 
         const animateTalking = () => {
@@ -506,23 +510,42 @@ class AudioSync {
                 console.log(`🔄 Animation looped back to frame 0 (Loop #${this.loopCount})`);
             }
 
-            // Update debug panel with constant fps and loop count
-            const frameDisplay = `frame_${paddedFrame}`;
-            const volume = this.getVolume(); // Still get volume for debug display
-            this.updateDebugPanel(volume, frameDisplay, fps, 'Talking', this.loopCount);
+            // Get dynamic speed multiplier from audio volume (1x-10x)
+            let rateMultiplier = 1.0;
+            let currentFps = baseFps;
+            let frameDelay = baseFrameDelay;
 
-            // Log every 15 frames (once per second at 15 fps)
-            logCounter++;
-            if (logCounter % 15 === 0) {
-                console.log(`🗣️ Talking - Constant 15 fps, Frame: ${paddedFrame}, Loop #${Math.floor(logCounter / totalFrames)}`);
+            if (useDynamicSpeed && getRateMultiplier) {
+                rateMultiplier = getRateMultiplier(); // Get current volume-based speed
+                currentFps = baseFps * rateMultiplier; // Adjust FPS based on volume
+                frameDelay = baseFrameDelay / rateMultiplier; // Faster = shorter delay
             }
 
-            // Continue animation at constant 15 fps
+            // Update debug panel with current fps and loop count
+            const frameDisplay = `frame_${paddedFrame}`;
+            const volume = this.getVolume(); // Get volume for debug display
+            this.updateDebugPanel(volume, frameDisplay, currentFps, 'Talking', this.loopCount);
+
+            // Log every 15 frames with current speed
+            logCounter++;
+            if (logCounter % 15 === 0) {
+                if (useDynamicSpeed) {
+                    console.log(`🗣️ Talking - ${currentFps.toFixed(1)} fps (${rateMultiplier.toFixed(1)}x), Frame: ${paddedFrame}, Loop #${Math.floor(logCounter / totalFrames)}`);
+                } else {
+                    console.log(`🗣️ Talking - Constant 15 fps, Frame: ${paddedFrame}, Loop #${Math.floor(logCounter / totalFrames)}`);
+                }
+            }
+
+            // Continue animation with dynamic or constant delay
             this.animationFrameId = setTimeout(() => animateTalking(), frameDelay);
         };
 
         console.log('   Using sprite sheet: images/sprites/talking_sprite.png');
-        console.log('   Playing at constant 15 fps (67ms per frame)');
+        if (useDynamicSpeed) {
+            console.log('   Speed adjusts 1x-10x based on audio volume (DRAMATIC range)');
+        } else {
+            console.log('   Playing at constant 15 fps (67ms per frame)');
+        }
 
         animateTalking();
     }

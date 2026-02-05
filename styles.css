@@ -21,6 +21,7 @@ body {
     max-width: 600px;
     width: 100%;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    position: relative; /* For absolute positioning of panels */
 }
 
 h1 {
@@ -58,21 +59,24 @@ h1 {
     margin: 0 auto 30px;
     border-radius: 10px;
     overflow: hidden;
-    background: #f0f0f0;
+    background: #f0f0f0 url('images/background.png') center center no-repeat;
+    background-size: 102% 102%; /* Slightly larger to eliminate white edges */
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
     border: 3px solid transparent; /* Default transparent border */
     transition: border-color 0.3s ease;
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0; /* Prevent shrinking when panels open */
 }
 
 #avatar {
     width: 50%; /* Scale down interpreter to 50% of canvas */
     height: 50%; /* Scale down interpreter to 50% of canvas */
     object-fit: contain; /* Keep full image visible in rectangular container */
-    transition: opacity 0.2s ease, transform 0.2s ease-out; /* Scale starts immediately, ends smoothly in 0.2s */
+    transition: opacity 0.1s ease, transform 0.1s ease-out; /* Fast transition for instant response */
     transform-origin: center center;
+    background: transparent; /* Make canvas transparent to show container background */
 }
 
 .status-text {
@@ -146,6 +150,25 @@ h1 {
     width: 100%;
 }
 
+/* Control Buttons Container */
+.control-buttons {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+    align-items: center;
+    position: relative; /* Create positioning context for panels */
+    z-index: 1; /* Ensure buttons are above panels */
+}
+
+.control-buttons .btn {
+    flex: 1; /* Equal width for all buttons */
+    margin: 0; /* Remove individual margins */
+}
+
+.control-buttons .btn-primary {
+    flex: 1.5; /* Make Start Session button slightly larger */
+}
+
 .btn-primary {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
@@ -193,13 +216,26 @@ h1 {
 
 /* Collapsible Settings Panel */
 .settings-panel {
-    margin-top: 20px;
-    padding: 20px;
+    margin-top: 0;
+    margin-bottom: 0;
+    padding: 0;
     background: #f8f9fa;
     border-radius: 10px;
     border: 2px solid #e0e0e0;
     overflow: hidden;
-    transition: max-height 0.3s ease, opacity 0.3s ease;
+    max-height: 0;
+    opacity: 0;
+    transition: max-height 0.4s ease, opacity 0.4s ease, margin 0.4s ease, padding 0.4s ease;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+/* When panel is visible */
+.settings-panel[style*="display: block"] {
+    max-height: 80vh;
+    opacity: 1;
+    margin-top: 20px;
+    padding: 20px;
+    overflow-y: auto;
 }
 
 .settings-panel > * {
@@ -208,13 +244,6 @@ h1 {
 
 .settings-panel > *:last-child {
     margin-bottom: 0;
-}
-
-.settings-panel.collapsed {
-    max-height: 0;
-    opacity: 0;
-    padding: 0;
-    margin: 0;
 }
 
 /* API Key Section */

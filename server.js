@@ -1,5 +1,5 @@
-// Simple Express server to proxy Claude API requests
-// This avoids CORS issues and keeps API key secure
+// Simple Express server for static file serving and Azure Speech token endpoint
+// Serves the translator app and provides secure token endpoint for Azure Speech
 
 const express = require('express');
 const cors = require('cors');
@@ -13,107 +13,139 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('.')); // Serve static files from current directory
 
-// Claude API configuration
-const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-const CLAUDE_MODEL = 'claude-3-5-sonnet-20241022';
+// Azure Speech token endpoint (secure - doesn't expose API key to client)
+app.get('/api/speech-token', (req, res) => {
+    const speechKey = process.env.AZURE_SPEECH_KEY;
+    const speechRegion = process.env.AZURE_SPEECH_REGION || 'eastus';
 
-// Translation endpoint
+    if (!speechKey || speechKey === 'your-azure-speech-key-here') {
+        return res.status(500).json({
+            error: 'Azure Speech key not configured. Please set AZURE_SPEECH_KEY in .env file'
+        });
+    }
+
+    res.json({
+        token: speechKey,
+        region: speechRegion
+    });
+});
+
+// Free Translation endpoint using MyMemory API
 app.post('/api/translate', async (req, res) => {
+    const { text, from, to } = req.body;
+
     try {
-        const { text, sourceLang, targetLang } = req.body;
+        const axios = require('axios');
 
-        if (!text) {
-            return res.status(400).json({ error: 'Text is required' });
-        }
-
-        // Get API key from environment variable
-        const apiKey = process.env.CLAUDE_API_KEY;
-        if (!apiKey) {
-            return res.status(500).json({
-                error: 'Claude API key not configured. Please set CLAUDE_API_KEY in .env file'
-            });
-        }
-
-        // Map language codes to names
-        const langNames = {
-            'en-US': 'English',
-            'zh-CN': 'Chinese'
+        // Map language codes to MyMemory format
+        const langMap = {
+            'en': 'en-US',
+            'zh-Hans': 'zh-CN',
+            'zh-CN': 'zh-CN'
         };
 
-        const sourceName = langNames[sourceLang] || sourceLang;
-        const targetName = langNames[targetLang] || targetLang;
+        const sourceLang = langMap[from] || from;
+        const targetLang = langMap[to] || to;
 
-        const prompt = `Translate the following ${sourceName} text to ${targetName}.
-Only provide the translation, no explanations or additional text:
+        // Use MyMemory free translation API (no key required, 1000 words/day)
+        const endpoint = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
 
-${text}`;
+        const response = await axios.get(endpoint);
 
-        console.log(`📡 Translating: ${sourceLang} → ${targetLang}`);
-        console.log(`   Text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+        if (response.data.responseStatus === 200) {
+            const translation = response.data.responseData.translatedText;
+            console.log(`✅ Translation: "${text}" → "${translation}"`);
+            res.json({ translation });
+        } else {
+            throw new Error('Translation API returned error');
+        }
+    } catch (error) {
+        console.error('Translation error:', error.response?.data || error.message);
 
-        // Call Claude API
-        const response = await fetch(CLAUDE_API_URL, {
-            method: 'POST',
+        // Fallback: return original text if translation fails
+        console.log('⚠️  Translation failed, returning original text');
+        res.json({ translation: text });
+    }
+});
+
+// Azure Speech TTS endpoint
+app.post('/api/synthesize', async (req, res) => {
+    const { text, lang } = req.body;
+    const speechKey = process.env.AZURE_SPEECH_KEY;
+    const speechRegion = process.env.AZURE_SPEECH_REGION || 'eastus';
+
+    if (!speechKey || speechKey === 'your-azure-speech-key-here') {
+        return res.status(500).json({
+            error: 'Azure Speech key not configured'
+        });
+    }
+
+    try {
+        const axios = require('axios');
+
+        // Map language codes to voice names
+        const voiceMap = {
+            'en': 'en-US-JennyNeural',
+            'en-US': 'en-US-JennyNeural',
+            'zh-Hans': 'zh-CN-XiaoxiaoNeural',
+            'zh-CN': 'zh-CN-XiaoxiaoNeural'
+        };
+
+        const voiceName = voiceMap[lang] || voiceMap['en-US'];
+        const endpoint = `https://${speechRegion}.tts.speech.microsoft.com/cognitiveservices/v1`;
+
+        const ssml = `
+            <speak version='1.0' xml:lang='en-US'>
+                <voice name='${voiceName}'>${text}</voice>
+            </speak>
+        `;
+
+        const response = await axios.post(endpoint, ssml, {
             headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01'
+                'Ocp-Apim-Subscription-Key': speechKey,
+                'Content-Type': 'application/ssml+xml',
+                'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3'
             },
-            body: JSON.stringify({
-                model: CLAUDE_MODEL,
-                max_tokens: 1024,
-                messages: [{
-                    role: 'user',
-                    content: prompt
-                }]
-            })
+            responseType: 'arraybuffer'
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            console.error('❌ Claude API error:', errorData);
-            return res.status(response.status).json({
-                error: `Claude API error: ${errorData.error?.message || response.statusText}`
-            });
-        }
-
-        const data = await response.json();
-        const translation = data.content[0].text.trim();
-
-        console.log(`✅ Translation: "${translation.substring(0, 50)}${translation.length > 50 ? '...' : ''}"`);
-
-        res.json({ translation });
+        res.set('Content-Type', 'audio/mpeg');
+        res.send(Buffer.from(response.data));
     } catch (error) {
-        console.error('❌ Server error:', error);
-        res.status(500).json({ error: error.message });
+        console.error('TTS error:', error.response?.data || error.message);
+        res.status(500).json({
+            error: 'TTS failed',
+            details: error.response?.data || error.message
+        });
     }
 });
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-    const hasApiKey = !!process.env.CLAUDE_API_KEY;
+    const hasApiKey = process.env.AZURE_SPEECH_KEY && process.env.AZURE_SPEECH_KEY !== 'your-azure-speech-key-here';
     res.json({
         status: 'ok',
         apiKeyConfigured: hasApiKey,
-        message: hasApiKey ? 'Server is ready' : 'CLAUDE_API_KEY not set in .env'
+        message: hasApiKey ? 'Server is ready with Azure Speech' : 'AZURE_SPEECH_KEY not set in .env'
     });
 });
 
 // Start server
 app.listen(PORT, () => {
     console.log('='.repeat(60));
-    console.log('🚀 Translation Server Started');
+    console.log('🚀 Azure Speech Translator Server Started');
     console.log('='.repeat(60));
     console.log(`📍 Server running on: http://localhost:${PORT}`);
     console.log(`🔍 Health check: http://localhost:${PORT}/api/health`);
-    console.log(`🌐 Translation endpoint: http://localhost:${PORT}/api/translate`);
+    console.log(`🎙️ Speech token endpoint: http://localhost:${PORT}/api/speech-token`);
     console.log('');
 
-    if (process.env.CLAUDE_API_KEY) {
-        console.log('✅ Claude API key configured');
+    const speechKey = process.env.AZURE_SPEECH_KEY;
+    if (speechKey && speechKey !== 'your-azure-speech-key-here') {
+        console.log(`✅ Azure Speech key configured (Region: ${process.env.AZURE_SPEECH_REGION || 'eastus'})`);
     } else {
-        console.log('⚠️  Claude API key NOT configured!');
-        console.log('   Create a .env file with: CLAUDE_API_KEY=your-key-here');
+        console.log('⚠️  Azure Speech key NOT configured!');
+        console.log('   Update .env file with: AZURE_SPEECH_KEY=your-key-here');
     }
 
     console.log('='.repeat(60));
