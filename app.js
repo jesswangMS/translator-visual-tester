@@ -1083,10 +1083,9 @@ class TranslatorApp {
         return new Promise((resolve, reject) => {
             try {
                 const SpeechSDK = window.SpeechSDK;
-
                 console.log(`🗣️ Using Azure Speech SDK for TTS (${lang})`);
 
-                // Create speech config using saved credentials
+                // Create speech config
                 const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(
                     this.speechToken,
                     this.speechRegion
@@ -1107,105 +1106,90 @@ class TranslatorApp {
                 // Synthesize speech
                 synthesizer.speakTextAsync(
                     text,
-                    (result) => {
+                    async (result) => {
                         if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) {
                             console.log('✅ TTS synthesis completed');
 
-                            // Convert audio data to blob
-                            const audioBlob = new Blob([result.audioData], { type: 'audio/mpeg' });
+                            try {
+                                // Convert audio data to blob
+                                const audioBlob = new Blob([result.audioData], { type: 'audio/mpeg' });
 
-                            // Process audio asynchronously
-                            (async () => {
-                                try {
-                                    // Initialize audio context if needed
-                                    if (!this.audioContext) {
-                                        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                                    }
-
-                                    // Resume context if suspended
-                                    if (this.audioContext.state === 'suspended') {
-                                        await this.audioContext.resume();
-                                    }
-
-                                    // Convert blob to array buffer
-                                    const arrayBuffer = await audioBlob.arrayBuffer();
-                                    const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-
-            // Create source and analyzer for volume analysis
-            const source = this.audioContext.createBufferSource();
-            const analyser = this.audioContext.createAnalyser();
-            analyser.fftSize = 256;
-            analyser.smoothingTimeConstant = 0.7;
-
-            source.buffer = audioBuffer;
-            source.connect(analyser);
-            analyser.connect(this.audioContext.destination);
-
-            this.currentAudioSource = source;
-
-            // Start playing and enter TALKING state
-            return new Promise((resolve) => {
-                console.log('🎙️ Azure TTS playback started - entering TALKING state');
-                this.setState(States.TALKING);
-
-                // Start animation with real-time volume analysis and SMOOTH EASING
-                const dataArray = new Uint8Array(analyser.frequencyBinCount);
-                let currentSpeed = 1.0; // Start at normal speed
-                const easingFactor = 0.2; // Higher = faster response, Lower = smoother (0.1-0.3 recommended)
-
-                const getVolumeMultiplier = () => {
-                    analyser.getByteFrequencyData(dataArray);
-                    const sum = dataArray.reduce((a, b) => a + b, 0);
-                    const average = sum / dataArray.length;
-                    const max = Math.max(...dataArray);
-                    const volume = (average * 0.5) + (max * 0.5);
-
-                    // Map volume (0-255) to target speed multiplier (1x-10x) - DRAMATIC range
-                    // Low volume → 1x (normal speed)
-                    // High volume → 10x (very fast, exaggerated lip movement)
-                    const normalizedVolume = Math.min(volume, 255) / 255; // 0.0 to 1.0
-                    const targetSpeed = 1.0 + (normalizedVolume * 9.0); // 1.0x to 10.0x
-
-                    // SMOOTH EASING: Interpolate current speed towards target speed
-                    // This creates ease-in/ease-out effect, preventing abrupt changes
-                    currentSpeed += (targetSpeed - currentSpeed) * easingFactor;
-
-                    return currentSpeed;
-                };
-
-                audioSync.startTalkingAnimation(this.avatarElement, getVolumeMultiplier);
-                console.log('   Talking animation started with Azure audio analysis');
-
-                                    source.onended = () => {
-                                        console.log('Azure TTS playback ended');
-                                        this.currentAudioSource = null;
-                                        audioSync.stopTalkingAnimation(this.avatarElement);
-                                        this.showIdleImage();
-
-                                        // Clear transcripts for next round
-                                        this.lastTranscript = '';
-                                        this.transcriptionElement.textContent = '';
-                                        console.log('🧹 Cleared transcripts for next session');
-
-                                        // If session is still active, return to IDLE
-                                        if (this.isActive) {
-                                            this.setState(States.IDLE);
-                                        } else {
-                                            this.setState(States.IDLE);
-                                        }
-
-                                        synthesizer.close();
-                                        resolve();
-                                    };
-
-                                    source.start(0);
-                                    console.log('   Audio source started with Azure SDK');
-                                } catch (audioError) {
-                                    console.error('❌ Audio processing failed:', audioError);
-                                    synthesizer.close();
-                                    reject(audioError);
+                                // Initialize audio context
+                                if (!this.audioContext) {
+                                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
                                 }
-                            })();
+
+                                if (this.audioContext.state === 'suspended') {
+                                    await this.audioContext.resume();
+                                }
+
+                                // Decode audio
+                                const arrayBuffer = await audioBlob.arrayBuffer();
+                                const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+                                // Create source and analyzer
+                                const source = this.audioContext.createBufferSource();
+                                const analyser = this.audioContext.createAnalyser();
+                                analyser.fftSize = 256;
+                                analyser.smoothingTimeConstant = 0.7;
+
+                                source.buffer = audioBuffer;
+                                source.connect(analyser);
+                                analyser.connect(this.audioContext.destination);
+
+                                this.currentAudioSource = source;
+
+                                // Enter TALKING state
+                                console.log('🎙️ Azure TTS playback started - entering TALKING state');
+                                this.setState(States.TALKING);
+
+                                // Start animation with volume analysis
+                                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                                let currentSpeed = 1.0;
+                                const easingFactor = 0.2;
+
+                                const getVolumeMultiplier = () => {
+                                    analyser.getByteFrequencyData(dataArray);
+                                    const sum = dataArray.reduce((a, b) => a + b, 0);
+                                    const average = sum / dataArray.length;
+                                    const max = Math.max(...dataArray);
+                                    const volume = (average * 0.5) + (max * 0.5);
+
+                                    const normalizedVolume = Math.min(volume, 255) / 255;
+                                    const targetSpeed = 1.0 + (normalizedVolume * 9.0);
+                                    currentSpeed += (targetSpeed - currentSpeed) * easingFactor;
+
+                                    return currentSpeed;
+                                };
+
+                                audioSync.startTalkingAnimation(this.avatarElement, getVolumeMultiplier);
+
+                                // Handle playback end
+                                source.onended = () => {
+                                    console.log('Azure TTS playback ended');
+                                    this.currentAudioSource = null;
+                                    audioSync.stopTalkingAnimation(this.avatarElement);
+                                    this.showIdleImage();
+
+                                    // Clear transcripts
+                                    this.lastTranscript = '';
+                                    this.transcriptionElement.textContent = '';
+
+                                    // Return to IDLE
+                                    if (this.isActive) {
+                                        this.setState(States.IDLE);
+                                    }
+
+                                    synthesizer.close();
+                                    resolve();
+                                };
+
+                                source.start(0);
+                            } catch (audioError) {
+                                console.error('❌ Audio processing failed:', audioError);
+                                synthesizer.close();
+                                reject(audioError);
+                            }
                         } else {
                             console.error('❌ TTS synthesis failed:', result.reason);
                             synthesizer.close();
