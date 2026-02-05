@@ -149,6 +149,36 @@
                 <small>How long to wait after you stop speaking before translation begins (1.0s = fast, 2.5s = patient)</small>
             </div>
 
+            <!-- Microphone Sensitivity Slider -->
+            <div class="api-key-section">
+                <label for="mic-sensitivity">Microphone Sensitivity: <span id="mic-sensitivity-value">25</span></label>
+                <input
+                    type="range"
+                    id="mic-sensitivity"
+                    min="10"
+                    max="50"
+                    value="25"
+                    step="5"
+                    style="width: 100%;"
+                >
+                <small>Adjust volume threshold for speech detection (10 = very sensitive, 50 = ignore background noise)</small>
+            </div>
+
+            <!-- Animation Speed Slider -->
+            <div class="api-key-section">
+                <label for="animation-speed">Talking Animation Speed: <span id="animation-speed-value">5x</span></label>
+                <input
+                    type="range"
+                    id="animation-speed"
+                    min="2"
+                    max="10"
+                    value="5"
+                    step="1"
+                    style="width: 100%;"
+                >
+                <small>Maximum animation speed when speaking (2x = subtle, 10x = very animated)</small>
+            </div>
+
             <!-- Instructions -->
             <div class="instructions">
                 <h3>How to use:</h3>

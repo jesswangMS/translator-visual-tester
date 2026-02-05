@@ -17,10 +17,12 @@ class AudioSync {
         this.talkingFrame = 0;
         this.isMicrophoneInitialized = false;
         this.volumeCallback = null; // Callback for volume detection
-        this.volumeThreshold = 20; // Threshold to detect speech (lower = more sensitive, higher = less sensitive)
+        this.volumeThreshold = 25; // Threshold to detect speech (lower = more sensitive, higher = less sensitive)
         this.loopCount = 0; // Track animation loops
         this.smoothedVolume = 0; // Smoothed volume for listening animation
-        this.volumeSmoothingFactor = 0.8; // Higher = faster response to volume changes (0-1, higher is faster)
+        this.volumeSmoothingFactor = 0.85; // Higher = faster response to volume changes (0-1, higher is faster)
+        this.microphoneStartTime = 0; // Track when microphone starts to ignore initial spike
+        this.maxAnimationSpeed = 5; // Maximum animation speed multiplier (2-10x)
         this.allFramesPreloaded = false; // Track if all animation frames are preloaded
         this.spriteSheets = {
             listening: null,
@@ -200,8 +202,8 @@ class AudioSync {
             // Create audio context and analyser
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
             this.analyser = this.audioContext.createAnalyser();
-            this.analyser.fftSize = 256;
-            this.analyser.smoothingTimeConstant = 0.2; // Low smoothing for fast response (0-1, lower is faster)
+            this.analyser.fftSize = 128; // Smaller FFT = lower latency
+            this.analyser.smoothingTimeConstant = 0.15; // Balanced smoothing - fast but filters noise (0-1, lower is faster)
 
             // Connect microphone to analyser
             this.microphone = this.audioContext.createMediaStreamSource(this.microphoneStream);
@@ -212,6 +214,7 @@ class AudioSync {
             this.dataArray = new Uint8Array(bufferLength);
 
             this.isMicrophoneInitialized = true;
+            this.microphoneStartTime = Date.now(); // Record start time to ignore initial spike
             console.log('✅ Microphone initialized successfully and will stay active for this session');
             return true;
         } catch (error) {
@@ -224,6 +227,12 @@ class AudioSync {
         if (!this.analyser || !this.dataArray) {
             console.warn('AudioSync: Analyser or dataArray not initialized');
             return 0;
+        }
+
+        // Ignore initial 500ms to prevent microphone initialization spike
+        const timeSinceStart = Date.now() - this.microphoneStartTime;
+        if (timeSinceStart < 500) {
+            return 0; // Return 0 during initialization period
         }
 
         this.analyser.getByteFrequencyData(this.dataArray);
@@ -257,15 +266,15 @@ class AudioSync {
             // smoothedVolume = smoothedVolume * (1 - factor) + rawVolume * factor
             this.smoothedVolume = this.smoothedVolume * (1 - this.volumeSmoothingFactor) + rawVolume * this.volumeSmoothingFactor;
 
-            // Check if volume exceeds threshold and notify via callback (use raw volume for detection)
-            if (this.volumeCallback && rawVolume > this.volumeThreshold) {
+            // Always notify callback with volume (for silence detection and state transitions)
+            if (this.volumeCallback) {
                 this.volumeCallback(rawVolume);
             }
 
-            // Map smoothed volume (0-150) to frame index (0-20)
-            // Clamp volume to max 150
-            const clampedVolume = Math.min(150, this.smoothedVolume);
-            const frameIndex = Math.floor((clampedVolume / 150) * 20);
+            // Map smoothed volume (0-100) to frame index (0-20) for better responsiveness
+            // Use lower max volume (100 instead of 150) so animation is more visible during normal speech
+            const clampedVolume = Math.min(100, this.smoothedVolume);
+            const frameIndex = Math.floor((clampedVolume / 100) * 20);
             const paddedIndex = frameIndex.toString().padStart(2, '0');
 
             // Draw frame from sprite sheet

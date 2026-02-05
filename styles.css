@@ -63,7 +63,7 @@ h1 {
     background-size: 102% 102%; /* Slightly larger to eliminate white edges */
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
     border: 3px solid transparent; /* Default transparent border */
-    transition: border-color 0.3s ease;
+    transition: border-color 0.05s ease; /* Near-instant transition */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -74,7 +74,7 @@ h1 {
     width: 50%; /* Scale down interpreter to 50% of canvas */
     height: 50%; /* Scale down interpreter to 50% of canvas */
     object-fit: contain; /* Keep full image visible in rectangular container */
-    transition: opacity 0.1s ease, transform 0.1s ease-out; /* Fast transition for instant response */
+    transition: opacity 0.05s ease, transform 0.05s ease-out; /* Near-instant state transitions */
     transform-origin: center center;
     background: transparent; /* Make canvas transparent to show container background */
 }
