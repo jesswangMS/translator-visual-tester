@@ -537,6 +537,14 @@ class TranslatorApp {
     }
 
     async toggleListening() {
+        console.log('🔘 Start Session button clicked');
+
+        // Detect iOS
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        if (isIOS) {
+            console.log('📱 iOS device detected');
+        }
+
         // Prevent double-clicking
         if (this.isTogglingListening) {
             console.log('Already toggling listening state, ignoring click...');
@@ -547,10 +555,15 @@ class TranslatorApp {
 
         try {
             if (!this.isActive) {
+                console.log('➡️ Starting session...');
                 await this.startListening();
             } else {
+                console.log('⏹️ Stopping session...');
                 this.stopListening();
             }
+        } catch (error) {
+            console.error('❌ Error in toggleListening:', error);
+            alert(`Failed to start: ${error.message}`);
         } finally {
             this.isTogglingListening = false;
         }
@@ -558,6 +571,12 @@ class TranslatorApp {
 
     async startListening() {
         try {
+            // Check if Azure Speech SDK is available
+            if (typeof window.SpeechSDK === 'undefined') {
+                throw new Error('Azure Speech SDK not loaded. Please refresh the page.');
+            }
+            console.log('✅ Azure Speech SDK is available');
+
             // Preload ALL animation frames (listening, thinking, timer, talking) before starting
             console.log('📦 Preloading all animation frames...');
             await Promise.all([
@@ -567,19 +586,26 @@ class TranslatorApp {
             console.log('✅ All frames preloaded and ready!');
 
             // Initialize microphone for animation
+            console.log('🎤 Initializing microphone...');
             await audioSync.initializeMicrophone();
+            console.log('✅ Microphone initialized');
 
             this.isActive = true;
 
             // Start Azure Speech continuous recognition
             console.log('🎙️ Starting Azure Speech continuous recognition...');
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
             this.recognition.startContinuousRecognitionAsync(
                 () => {
                     console.log('✅ Azure Speech recognition started successfully');
                 },
                 (error) => {
                     console.error('❌ Failed to start Azure Speech recognition:', error);
-                    throw error;
+                    const errorMsg = isIOS
+                        ? `iOS Safari may have limited support for Azure Speech SDK. Error: ${error}`
+                        : `Failed to start speech recognition: ${error}`;
+                    throw new Error(errorMsg);
                 }
             );
 
